@@ -8,10 +8,18 @@ class RealtimeSocketService {
     this.listeners = new Map();
   }
 
+  getServerUrl() {
+    if (typeof window === 'undefined') return 'http://localhost:3001';
+    if (window.location.port === '5173') {
+      return `http://${window.location.hostname}:3001`;
+    }
+    return window.location.origin;
+  }
+
   initSocket() {
     if (this.socket && this.isConnected) return this.socket;
 
-    const serverUrl = `http://${window.location.hostname}:3001`;
+    const serverUrl = this.getServerUrl();
     this.socket = io(serverUrl, {
       transports: ['websocket', 'polling'],
       reconnectionAttempts: 10,
@@ -20,7 +28,7 @@ class RealtimeSocketService {
 
     this.socket.on('connect', () => {
       this.isConnected = true;
-      console.log('[REALTIME] Connected to Chatforge Relay Server');
+      console.log('[REALTIME] Connected to Chatforge Relay Server at', serverUrl);
     });
 
     this.socket.on('disconnect', () => {
@@ -46,7 +54,7 @@ class RealtimeSocketService {
 
   connect(profile, callbacks = {}) {
     this.currentProfile = profile;
-    const serverUrl = `http://${window.location.hostname}:3001`;
+    const serverUrl = this.getServerUrl();
 
     if (this.socket) {
       this.socket.disconnect();

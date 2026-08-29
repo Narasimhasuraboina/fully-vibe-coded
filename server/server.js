@@ -393,7 +393,40 @@ function broadcastDirectory() {
   io.emit('online_peers_list', directory);
 }
 
-const PORT = 3001;
+// Serve static frontend files for single-port / production / tunneling
+const DIST_PATH = path.join(__dirname, '../dist');
+if (fs.existsSync(DIST_PATH)) {
+  app.use(express.static(DIST_PATH));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
+      return next();
+    }
+    res.sendFile(path.join(DIST_PATH, 'index.html'));
+  });
+} else {
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
+      return next();
+    }
+    res.status(200).send(`
+      <!DOCTYPE html>
+      <html>
+      <head><title>Chatforge Relay Engine</title></head>
+      <body style="background:#020502;color:#00ff66;font-family:monospace;padding:30px;line-height:1.6;">
+        <h2>[CHATFORGE RELAY ENGINE ONLINE]</h2>
+        <p>Backend Socket.io Server is running on port ${process.env.PORT || 3001}.</p>
+        <p><strong>To render the frontend UI:</strong></p>
+        <ol>
+          <li>Run <code>npm run build</code> to generate the <code>dist/</code> folder.</li>
+          <li>On Render/Railway, set your <strong>Build Command</strong> to: <code>npm install && npm run build</code></li>
+        </ol>
+      </body>
+      </html>
+    `);
+  });
+}
+
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`[CHATFORGE RELAY ENGINE] Running on port ${PORT}`);
   console.log(`[LOCAL MESH URL] http://localhost:${PORT}`);
