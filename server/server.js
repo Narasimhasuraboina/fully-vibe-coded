@@ -1,0 +1,402 @@
+import express from 'express';
+import http from 'http';
+import { Server } from 'socket.io';
+import cors from 'cors';
+import os from 'os';
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const DB_FILE = path.join(__dirname, 'users_db.json');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST'],
+  },
+});
+
+// Map of all registered users on the network:
+// tag (e.g. '@narasimha') -> { socketId, username, tag, passwordHash, avatar, ip, lastSeen, status, customStatus }
+const registeredUsers = new Map();
+
+// Helper to hash password with quantum salt
+function hashPassword(password, salt = 'chatforge_quantum_salt_v1') {
+  return crypto.createHash('sha256').update(password + salt).digest('hex');
+}
+
+// Load persistent users DB
+function loadUserDatabase() {
+  try {
+    if (fs.existsSync(DB_FILE)) {
+      const data = fs.readFileSync(DB_FILE, 'utf8');
+      const parsed = JSON.parse(data);
+      Object.entries(parsed).forEach(([tag, user]) => {
+        registeredUsers.set(tag.toLowerCase(), {
+          ...user,
+          status: 'offline',
+          socketId: null,
+        });
+      });
+      console.log(`[DATABASE] Loaded ${registeredUsers.size} registered users from ${DB_FILE}`);
+    }
+  } catch (err) {
+    console.error('[DATABASE] Error loading users_db.json:', err);
+  }
+}
+
+// Save persistent users DB
+function saveUserDatabase() {
+  try {
+    const obj = {};
+    registeredUsers.forEach((user, tag) => {
+      obj[tag] = {
+        username: user.username,
+        tag: user.tag,
+        passwordHash: user.passwordHash,
+        avatar: user.avatar,
+        customStatus: user.customStatus,
+        registeredAt: user.registeredAt || Date.now(),
+        lastSeen: user.lastSeen,
+      };
+    });
+    fs.writeFileSync(DB_FILE, JSON.stringify(obj, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[DATABASE] Error saving users_db.json:', err);
+  }
+}
+
+loadUserDatabase();
+
+// Helper to sanitize user profile for client transmission (strips passwordHash)
+function sanitizeUser(user) {
+  if (!user) return null;
+  const { passwordHash: _passwordHash, ...safe } = user;
+  return safe;
+}
+
+function getSanitizedDirectory() {
+  return Array.from(registeredUsers.values()).map(sanitizeUser);
+}
+
+// Helper to get local network IP address
+function getLocalNetworkIP() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return 'localhost';
+}
+
+const localIP = getLocalNetworkIP();
+
+// API endpoint for server discovery
+app.get('/api/info', (req, res) => {
+  res.json({
+    name: 'Chatforge Real-Time Zero-Knowledge Relay Server',
+    status: 'ONLINE',
+    localIP,
+    port: 3001,
+    registeredCount: registeredUsers.size,
+  });
+});
+
+io.on('connection', (socket) => {
+  const clientIP = socket.handshake.headers['x-forwarded-for'] || socket.handshake.address || '127.0.0.1';
+
+  // 1. Password-Protected Authentication & Registration
+  socket.on('authenticate_user', (authData, callback) => {
+    const rawUsername = authData.username || '';
+    const cleanUser = rawUsername.trim().replace(/^@/, '');
+    const tag = `@${cleanUser.toLowerCase()}`;
+    const password = authData.password || '';
+    const isRegisterMode = authData.isRegisterMode;
+
+    if (!cleanUser || cleanUser.length < 2) {
+      const resp = { success: false, error: 'Username must be at least 2 characters.' };
+      if (typeof callback === 'function') callback(resp);
+      else socket.emit('auth_response', resp);
+      return;
+    }
+
+    if (!password || password.length < 4) {
+      const resp = { success: false, error: 'Password must be at least 4 characters.' };
+      if (typeof callback === 'function') callback(resp);
+      else socket.emit('auth_response', resp);
+      return;
+    }
+
+    const existing = registeredUsers.get(tag);
+    const passwordHash = hashPassword(password);
+
+    if (existing) {
+      // If user specifically clicked REGISTER on an existing username
+      if (isRegisterMode) {
+        const resp = { success: false, error: `Codename "${tag}" is already registered. Please switch to LOGIN or pick another username.` };
+        if (typeof callback === 'function') callback(resp);
+        else socket.emit('auth_response', resp);
+        return;
+      }
+
+      // Check password match
+      if (existing.passwordHash !== passwordHash) {
+        console.log(`[AUTH REJECTED] Bad password attempt for ${tag} from ${clientIP}`);
+        const resp = { success: false, error: 'INVALID CIPHER PASSKEY! Access denied for this username.' };
+        if (typeof callback === 'function') callback(resp);
+        else socket.emit('auth_response', resp);
+        return;
+      }
+
+      // Password verified! Login successful
+      existing.socketId = socket.id;
+      existing.status = 'online';
+      existing.lastSeen = 'online';
+      existing.ip = clientIP;
+      if (authData.avatar) existing.avatar = authData.avatar;
+      if (authData.customStatus) existing.customStatus = authData.customStatus;
+
+      socket.userTag = tag;
+      saveUserDatabase();
+      console.log(`[AUTH SUCCESS] User ${cleanUser} (${tag}) authenticated.`);
+
+      const safeUser = sanitizeUser(existing);
+      const resp = {
+        success: true,
+        peerInfo: safeUser,
+        localIP,
+        directory: getSanitizedDirectory(),
+      };
+
+      if (typeof callback === 'function') callback(resp);
+      socket.emit('registered', resp);
+
+      broadcastDirectory();
+
+      socket.broadcast.emit('peer_online_event', {
+        peer: safeUser,
+        timestamp: Date.now(),
+      });
+
+    } else {
+      // New User Registration
+      const newUser = {
+        socketId: socket.id,
+        username: cleanUser,
+        tag,
+        passwordHash,
+        avatar: authData.avatar || `https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80`,
+        ip: clientIP,
+        status: 'online',
+        customStatus: authData.customStatus || 'Active Node on Mesh Network',
+        lastSeen: 'online',
+        registeredAt: Date.now(),
+      };
+
+      registeredUsers.set(tag, newUser);
+      socket.userTag = tag;
+      saveUserDatabase();
+      console.log(`[REGISTER SUCCESS] New Operator ${cleanUser} (${tag}) registered and authenticated.`);
+
+      const safeUser = sanitizeUser(newUser);
+      const resp = {
+        success: true,
+        peerInfo: safeUser,
+        localIP,
+        directory: getSanitizedDirectory(),
+      };
+
+      if (typeof callback === 'function') callback(resp);
+      socket.emit('registered', resp);
+
+      broadcastDirectory();
+
+      socket.broadcast.emit('peer_online_event', {
+        peer: safeUser,
+        timestamp: Date.now(),
+      });
+    }
+  });
+
+  // Legacy fallback for register_peer
+  socket.on('register_peer', (peerData) => {
+    const rawUsername = peerData.username || `Operator_${socket.id.substring(0, 4)}`;
+    const cleanUser = rawUsername.trim().replace(/^@/, '');
+    const tag = `@${cleanUser.toLowerCase()}`;
+    const existing = registeredUsers.get(tag);
+
+    if (existing) {
+      existing.socketId = socket.id;
+      existing.status = 'online';
+      existing.lastSeen = 'online';
+      socket.userTag = tag;
+      const safe = sanitizeUser(existing);
+      socket.emit('registered', { peerInfo: safe, localIP, port: 3001, directory: getSanitizedDirectory() });
+      broadcastDirectory();
+      socket.broadcast.emit('peer_online_event', { peer: safe, timestamp: Date.now() });
+    }
+  });
+
+  // 2. Global Username Search
+  socket.on('search_users', ({ query }, callback) => {
+    const q = (query || '').toLowerCase().trim().replace(/^@/, '');
+    const allUsers = getSanitizedDirectory();
+
+    let matches = [];
+    if (!q) {
+      matches = allUsers;
+    } else {
+      matches = allUsers.filter(u => 
+        u.username.toLowerCase().includes(q) || 
+        u.tag.toLowerCase().includes(q)
+      );
+    }
+
+    if (typeof callback === 'function') {
+      callback(matches);
+    } else {
+      socket.emit('search_results', matches);
+    }
+  });
+
+  // 3. Relay Message Protocol
+  socket.on('send_message', (payload) => {
+    const sender = socket.userTag ? registeredUsers.get(socket.userTag) : null;
+    if (!sender) return;
+
+    const { recipientTag, message } = payload;
+    const recipient = registeredUsers.get(recipientTag?.toLowerCase());
+
+    if (recipient && recipient.status === 'online' && recipient.socketId) {
+      // Recipient is ONLINE -> Deliver in real-time
+      io.to(recipient.socketId).emit('receive_message', {
+        message,
+        senderInfo: sanitizeUser(sender),
+      });
+
+      // Confirm delivered to sender
+      socket.emit('message_delivered_ack', {
+        messageId: message.id,
+        recipientTag,
+        status: 'delivered',
+      });
+    } else {
+      // Recipient is OFFLINE -> Notify sender to store in local outbox
+      socket.emit('peer_offline_ack', {
+        messageId: message.id,
+        recipientTag,
+        reason: 'RECIPIENT_OFFLINE_SAVED_TO_SENDER_OUTBOX',
+      });
+    }
+  });
+
+  // 4. Burn-After-Read (View-Once) Protocol
+  socket.on('message_viewed', ({ messageId, senderTag, burnDelay = 5 }) => {
+    const sender = registeredUsers.get(senderTag?.toLowerCase());
+    const viewer = socket.userTag ? registeredUsers.get(socket.userTag) : null;
+
+    if (sender && sender.socketId) {
+      io.to(sender.socketId).emit('message_viewed_by_peer', {
+        messageId,
+        viewerTag: viewer?.tag,
+        burnDelay,
+      });
+    }
+  });
+
+  // 5. Message Shred Confirmation
+  socket.on('message_shredded', ({ messageId, targetTag }) => {
+    const target = registeredUsers.get(targetTag?.toLowerCase());
+    if (target && target.socketId) {
+      io.to(target.socketId).emit('message_shredded_ack', { messageId });
+    }
+  });
+
+  // 6. Real-Time Typing Indicator
+  socket.on('typing_indicator', ({ recipientTag, isTyping }) => {
+    const sender = socket.userTag ? registeredUsers.get(socket.userTag) : null;
+    if (!sender) return;
+
+    const recipient = registeredUsers.get(recipientTag?.toLowerCase());
+    if (recipient && recipient.socketId) {
+      io.to(recipient.socketId).emit('peer_typing', {
+        senderTag: sender.tag,
+        isTyping,
+      });
+    }
+  });
+
+  // 7. WebRTC Audio / Video Call Signaling
+  socket.on('call_offer', (data) => {
+    const sender = socket.userTag ? registeredUsers.get(socket.userTag) : null;
+    const target = registeredUsers.get(data.targetTag?.toLowerCase());
+    if (target && target.socketId) {
+      io.to(target.socketId).emit('incoming_call_signal', {
+        callerInfo: sanitizeUser(sender),
+        callType: data.callType,
+        offer: data.offer,
+      });
+    }
+  });
+
+  socket.on('call_answer', (data) => {
+    const caller = registeredUsers.get(data.callerTag?.toLowerCase());
+    if (caller && caller.socketId) {
+      io.to(caller.socketId).emit('call_answered_signal', {
+        answer: data.answer,
+      });
+    }
+  });
+
+  socket.on('call_end', (data) => {
+    const target = registeredUsers.get(data.targetTag?.toLowerCase());
+    if (target && target.socketId) {
+      io.to(target.socketId).emit('call_ended_signal');
+    }
+  });
+
+  // 8. Disconnect Handler
+  socket.on('disconnect', () => {
+    if (socket.userTag) {
+      const user = registeredUsers.get(socket.userTag);
+      if (user) {
+        user.status = 'offline';
+        user.lastSeen = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        user.socketId = null;
+
+        console.log(`[USER OFFLINE] ${user.username} (${user.tag}) went offline`);
+
+        socket.broadcast.emit('peer_offline_event', {
+          tag: user.tag,
+          lastSeen: user.lastSeen,
+        });
+
+        broadcastDirectory();
+      }
+    }
+  });
+});
+
+function broadcastDirectory() {
+  const directory = getSanitizedDirectory();
+  io.emit('online_peers_list', directory);
+}
+
+const PORT = 3001;
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`[CHATFORGE RELAY ENGINE] Running on port ${PORT}`);
+  console.log(`[LOCAL MESH URL] http://localhost:${PORT}`);
+  console.log(`[NETWORK LAN URL] http://${localIP}:${PORT}`);
+  console.log(`[USER DATABASE & AUTH] Active. Password protection & persistent user storage enabled.`);
+});
