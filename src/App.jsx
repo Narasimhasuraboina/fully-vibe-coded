@@ -501,6 +501,9 @@ function App() {
     const targetContact = contacts.find((c) => c.id === targetId);
     if (!targetContact) return;
 
+    const recipientTag = targetContact.tag || (targetContact.name ? `@${targetContact.name.replace(/^@/, '')}` : null);
+    if (!recipientTag) return;
+
     const newMsg = createMessageObject(
       messagePayload,
       true,
@@ -514,10 +517,10 @@ function App() {
     }));
 
     // 2. Dispatch via Real-time Socket (Always attempt real-time transmission)
-    const sent = socketService.sendMessage(targetContact.tag, newMsg);
+    const sent = socketService.sendMessage(recipientTag, newMsg);
     if (!sent) {
       // Local client itself is disconnected / offline
-      socketService.saveToOutbox(targetContact.tag, newMsg);
+      socketService.saveToOutbox(recipientTag, newMsg);
     }
 
     // 3. Reset unread count for target
