@@ -13,7 +13,8 @@ import {
   Zap, 
   Radio, 
   X, 
-  FolderLock 
+  FolderLock,
+  UserX 
 } from 'lucide-react';
 import MessageItem from './MessageItem';
 import MessageInput from './MessageInput';
@@ -33,6 +34,7 @@ const ChatArea = ({
   onOpenMediaVault,
   onOpenMediaViewer,
   onForwardMessage,
+  onDeleteContact,
   isTyping,
   gbSettings,
   onClearThread
@@ -230,6 +232,15 @@ const ChatArea = ({
                 </button>
                 <button onClick={() => { soundFX.playGlitchAlarm(); onClearThread(activeContact.id); setShowOptionsDropdown(false); }}>
                   <Trash2 size={14} className="text-danger" /> Clear Buffer Logs
+                </button>
+                <button 
+                  className="text-danger" 
+                  onClick={() => { 
+                    setShowOptionsDropdown(false); 
+                    if (onDeleteContact) onDeleteContact(activeContact); 
+                  }}
+                >
+                  <UserX size={14} className="text-danger" /> Delete Contact & Thread
                 </button>
               </div>
             )}

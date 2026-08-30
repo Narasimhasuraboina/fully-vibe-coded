@@ -4352,3 +4352,80 @@
   background: var(--accent);
   color: #000;
 }
+
+/* Chat Item Delete Button */
+.chat-item-delete-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.chat-item:hover .chat-item-delete-btn {
+  display: flex;
+}
+.chat-item-delete-btn:hover {
+  color: var(--danger);
+  background: rgba(255, 51, 102, 0.15);
+}
+
+/* Delete Contact Confirmation Modal */
+.delete-contact-modal {
+  max-width: 440px;
+  border: 1px solid var(--danger);
+  box-shadow: 0 0 30px rgba(255, 51, 102, 0.25);
+}
+.delete-contact-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: rgba(255, 51, 102, 0.06);
+  border: 1px dashed rgba(255, 51, 102, 0.3);
+  border-radius: 6px;
+  margin-bottom: 14px;
+}
+.delete-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--danger);
+  object-fit: cover;
+}
+.delete-info {
+  display: flex;
+  flex-direction: column;
+}
+.delete-name {
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--text-main);
+}
+.delete-tag {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.delete-warning-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin-bottom: 18px;
+}
+.delete-warning-text strong {
+  color: var(--text-main);
+}
+.cyber-btn.btn-danger {
+  background: rgba(255, 51, 102, 0.2);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+}
+.cyber-btn.btn-danger:hover {
+  background: var(--danger);
+  color: #fff;
+  box-shadow: 0 0 15px rgba(255, 51, 102, 0.5);
+}

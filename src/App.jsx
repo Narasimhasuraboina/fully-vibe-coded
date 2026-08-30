@@ -35,6 +35,7 @@ import MediaGalleryModal from './components/MediaGalleryModal';
 import EncryptionModal from './components/EncryptionModal';
 import ForwardModal from './components/ForwardModal';
 import ToastNotification from './components/ToastNotification';
+import { Trash2, X } from 'lucide-react';
 
 function createMessageObject(payload, isUser = true, hideSecondTick = false) {
   const timeNow = Date.now();
@@ -103,6 +104,7 @@ function App() {
   const [mediaVaultContact, setMediaVaultContact] = useState(null);
   const [encryptionModalContact, setEncryptionModalContact] = useState(null);
   const [forwardingMessage, setForwardingMessage] = useState(null);
+  const [contactToDelete, setContactToDelete] = useState(null);
 
   // References for Real-time event handlers
   const activeContactRef = useRef(activeContactId);
@@ -531,6 +533,50 @@ function App() {
     setIsRealtimeConnected(false);
   };
 
+  // Initiate Delete Contact Prompt
+  const handleInitiateDeleteContact = (contact) => {
+    soundFX.playKeypress();
+    setContactToDelete(contact);
+  };
+
+  // Confirm and Purge Contact from Screen & Storage
+  const handleConfirmDeleteContact = () => {
+    if (!contactToDelete) return;
+    const target = contactToDelete;
+    soundFX.playGlitchAlarm();
+
+    // 1. Remove contact from contacts list
+    setContacts((prev) => {
+      const updated = prev.filter((c) => c.id !== target.id);
+      saveState('contacts', updated);
+      return updated;
+    });
+
+    // 2. Remove messages thread
+    setMessages((prev) => {
+      const updated = { ...prev };
+      delete updated[target.id];
+      saveState('messages', updated);
+      return updated;
+    });
+
+    // 3. Clear from local outbox if any
+    socketService.removeFromOutbox(target.tag);
+
+    // 4. Update active contact if deleted was currently active
+    if (activeContactId === target.id) {
+      setActiveContactId(null);
+    }
+
+    setContactToDelete(null);
+
+    notificationService.pushToast({
+      title: 'CONTACT PURGED',
+      message: `Node ${target.name} (${target.tag}) removed from terminal screen.`,
+      type: 'info',
+    });
+  };
+
   // Reactions Handler
   const handleReactMessage = (messageId, emoji) => {
     if (!activeContact) return;
@@ -725,6 +771,7 @@ function App() {
           contacts={contacts}
           activeContact={activeContact}
           onSelectContact={handleSelectContact}
+          onDeleteContact={handleInitiateDeleteContact}
           messages={messages}
           typingStatus={typingStatus}
           stories={stories}
@@ -756,6 +803,7 @@ function App() {
           onOpenMediaVault={(c) => setMediaVaultContact(c)}
           onOpenMediaViewer={(m) => setMediaViewerItem(m)}
           onForwardMessage={(m) => setForwardingMessage(m)}
+          onDeleteContact={handleInitiateDeleteContact}
           isTyping={typingStatus[activeContact?.id]}
           gbSettings={gbSettings}
           onClearThread={handleClearThread}
@@ -920,6 +968,56 @@ function App() {
           onSelectAndAddContact={handleSelectAndAddContact}
           onClose={() => setShowSearchUserModal(false)}
         />
+      )}
+
+      {/* 15. Delete Contact Confirmation Modal */}
+      {contactToDelete && (
+        <div className="modal-backdrop" onClick={() => setContactToDelete(null)}>
+          <div className="cyber-modal delete-contact-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title text-danger">
+                <Trash2 size={16} className="text-danger" />
+                <span>TERMINATE FREQUENCY // PURGE CONTACT</span>
+              </div>
+              <button className="btn-close" onClick={() => setContactToDelete(null)}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <div className="delete-contact-preview">
+                <img src={contactToDelete.avatar} alt={contactToDelete.name} className="delete-avatar" />
+                <div className="delete-info">
+                  <span className="delete-name">{contactToDelete.name}</span>
+                  <span className="delete-tag">{contactToDelete.tag}</span>
+                </div>
+              </div>
+
+              <p className="delete-warning-text">
+                Are you sure you want to remove <strong>@{contactToDelete.name}</strong> from your screen?
+                All local conversation logs, unread counts, and session state for this node will be purged from this device.
+              </p>
+
+              <div className="modal-footer-actions">
+                <button
+                  type="button"
+                  className="cyber-btn btn-secondary"
+                  onClick={() => setContactToDelete(null)}
+                >
+                  CANCEL
+                </button>
+                <button
+                  type="button"
+                  className="cyber-btn btn-danger"
+                  onClick={handleConfirmDeleteContact}
+                >
+                  <Trash2 size={14} />
+                  <span>PURGE FROM TERMINAL</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

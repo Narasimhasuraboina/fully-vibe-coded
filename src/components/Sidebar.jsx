@@ -27,6 +27,7 @@ const Sidebar = ({
   onOpenSchedule,
   gbSettings,
   onTogglePinContact,
+  onDeleteContact,
   onUnlockSecretChats,
   isSecretUnlocked,
 }) => {
@@ -304,6 +305,7 @@ const Sidebar = ({
                 contact={contact}
                 isActive={activeContact?.id === contact.id}
                 onSelect={onSelectContact}
+                onDeleteContact={onDeleteContact}
                 lastMessage={lastMsg}
                 isTyping={isTyping}
                 onTogglePin={onTogglePinContact}

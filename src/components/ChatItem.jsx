@@ -1,11 +1,12 @@
 import React from 'react';
-import { Pin, Lock, ShieldAlert, Check, CheckCheck, Clock } from 'lucide-react';
+import { Pin, Lock, ShieldAlert, Check, CheckCheck, Clock, Trash2 } from 'lucide-react';
 import { soundFX } from '../services/audioService';
 
 const ChatItem = ({ 
   contact, 
   isActive, 
   onSelect, 
+  onDeleteContact,
   lastMessage, 
   isTyping,
   gbSettings
@@ -84,6 +85,17 @@ const ChatItem = ({
             {contact.unreadCount > 0 && (
               <span className="unread-badge">{contact.unreadCount}</span>
             )}
+            <button
+              type="button"
+              className="chat-item-delete-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onDeleteContact) onDeleteContact(contact);
+              }}
+              title={`Delete ${contact.name} from conversations`}
+            >
+              <Trash2 size={12} />
+            </button>
           </div>
         </div>
       </div>
