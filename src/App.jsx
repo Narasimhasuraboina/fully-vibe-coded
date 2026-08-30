@@ -12,6 +12,7 @@ import {
 import { loadState, saveState } from './services/storage';
 import { soundFX } from './services/audioService';
 import { socketService } from './services/socketService';
+import { notificationService } from './services/notificationService';
 
 // Components
 import LoginScreen from './components/LoginScreen';
@@ -21,6 +22,7 @@ import ChatArea from './components/ChatArea';
 import HackerInspector from './components/HackerInspector';
 import MatrixBackground from './components/MatrixBackground';
 import CallModal from './components/CallModal';
+import IncomingCallAlert from './components/IncomingCallAlert';
 import StatusViewerModal from './components/StatusViewerModal';
 import DirectChatModal from './components/DirectChatModal';
 import BroadcastModal from './components/BroadcastModal';
@@ -28,6 +30,11 @@ import ScheduleModal from './components/ScheduleModal';
 import LockModal from './components/LockModal';
 import ProfileModal from './components/ProfileModal';
 import SearchUserModal from './components/SearchUserModal';
+import MediaViewerModal from './components/MediaViewerModal';
+import MediaGalleryModal from './components/MediaGalleryModal';
+import EncryptionModal from './components/EncryptionModal';
+import ForwardModal from './components/ForwardModal';
+import ToastNotification from './components/ToastNotification';
 
 function createMessageObject(payload, isUser = true, hideSecondTick = false) {
   const timeNow = Date.now();
@@ -37,6 +44,7 @@ function createMessageObject(payload, isUser = true, hideSecondTick = false) {
     sender: isUser ? 'user' : payload.sender,
     text: payload.text || '',
     type: payload.type || 'text',
+    mediaUrl: payload.mediaUrl || null,
     code: payload.code,
     language: payload.language,
     fileName: payload.fileName,
@@ -48,7 +56,7 @@ function createMessageObject(payload, isUser = true, hideSecondTick = false) {
     timestamp: payload.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     status: hideSecondTick ? 'sent' : 'delivered',
     createdAt: timeNow,
-    burnAfterRead: payload.burnAfterRead ?? true, // View-Once auto-delete default
+    burnAfterRead: payload.burnAfterRead ?? false, // View-Once auto-delete default
     burnCountdown: payload.burnCountdown ?? null,
     isOutboxPending: payload.isOutboxPending ?? false,
   };
@@ -78,13 +86,22 @@ function App() {
   const [isAppLocked, setIsAppLocked] = useState(false);
   const [isSecretUnlocked, setIsSecretUnlocked] = useState(false);
   const [showSecretUnlockModal, setShowSecretUnlockModal] = useState(false);
-  const [callActive, setCallActive] = useState(null); // { contact, callType }
+  
+  // Real WebRTC Call states
+  const [callActive, setCallActive] = useState(null); // { contact, callType, isIncoming, incomingOffer }
+  const [incomingCallAlert, setIncomingCallAlert] = useState(null); // { callerInfo, callType, offer }
+
+  // Enhanced Media & Feature Modals
   const [activeStoryId, setActiveStoryId] = useState(null);
   const [showDirectChatModal, setShowDirectChatModal] = useState(false);
   const [showBroadcastModal, setShowBroadcastModal] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showSearchUserModal, setShowSearchUserModal] = useState(false);
+  const [mediaViewerItem, setMediaViewerItem] = useState(null);
+  const [mediaVaultContact, setMediaVaultContact] = useState(null);
+  const [encryptionModalContact, setEncryptionModalContact] = useState(null);
+  const [forwardingMessage, setForwardingMessage] = useState(null);
 
   // References for Real-time event handlers
   const activeContactRef = useRef(activeContactId);
@@ -94,6 +111,13 @@ function App() {
     activeContactRef.current = activeContactId;
     contactsRef.current = contacts;
   }, [activeContactId, contacts]);
+
+  // Request browser notification permission once logged in
+  useEffect(() => {
+    if (myProfile) {
+      notificationService.requestPermission();
+    }
+  }, [myProfile]);
 
   // Sync state to LocalStorage
   useEffect(() => saveState('my_profile', myProfile), [myProfile]);
@@ -130,6 +154,26 @@ function App() {
   // Active Contact Object
   const activeContact = contacts.find((c) => c.id === activeContactId) || contacts[0] || null;
 
+  // Contact Selection Handler (Triggers View-Once Burn on unread messages)
+  const handleSelectContact = (contact) => {
+    setActiveContactId(contact.id);
+    setContacts((prev) => prev.map((item) => item.id === contact.id ? { ...item, unreadCount: 0 } : item));
+
+    setMessages((prev) => {
+      const thread = prev[contact.id] || [];
+      let modified = false;
+      const updated = thread.map((m) => {
+        if (m.sender !== 'user' && m.burnCountdown === null && m.burnAfterRead) {
+          modified = true;
+          socketService.emitMessageViewed(m.id, contact.tag, 5);
+          return { ...m, burnCountdown: 5 };
+        }
+        return m;
+      });
+      return modified ? { ...prev, [contact.id]: updated } : prev;
+    });
+  };
+
   // Burn / Shred Message Handler (Completely deletes from state & storage)
   const handleBurnShredMessage = useCallback((messageId, targetContactId = activeContactId) => {
     setMessages((prev) => {
@@ -155,7 +199,7 @@ function App() {
 
     if (!senderContact) {
       targetContactId = `peer_${Date.now()}`;
-      const newPeerContact = {
+      senderContact = {
         id: targetContactId,
         name: senderInfo.username,
         tag: senderInfo.tag,
@@ -171,7 +215,7 @@ function App() {
         customStatus: senderInfo.customStatus || 'Connected Live Peer Node',
         bio: 'Real-time connected client device on mesh relay.',
       };
-      setContacts((prev) => [newPeerContact, ...prev]);
+      setContacts((prev) => [senderContact, ...prev]);
     } else {
       // Increment unread count if not currently looking at this active chat
       if (activeContactRef.current !== senderContact.id) {
@@ -181,6 +225,27 @@ function App() {
       }
     }
 
+    // Push Desktop & HUD Toast Notification
+    const payloadSnippet = message.type === 'image' ? '📷 Encrypted Photo'
+      : message.type === 'video' ? '🎥 Encrypted Video Stream'
+      : message.type === 'audio' ? '🎙️ Voice Intercept'
+      : message.type === 'code' ? '💻 Executable Code Payload'
+      : message.text || 'Encrypted Payload';
+
+    notificationService.pushToast({
+      title: `SIGNAL FROM ${senderInfo.username}`,
+      message: payloadSnippet,
+      avatar: senderInfo.avatar,
+      type: 'info',
+      actionLabel: 'OPEN CHAT',
+      onAction: () => handleSelectContact(senderContact),
+    });
+
+    notificationService.showDesktopNotification(`Chatforge: ${senderInfo.username}`, {
+      body: payloadSnippet,
+      icon: senderInfo.avatar || '/favicon.svg',
+    });
+
     // Prepare incoming message with Burn-After-Read (View-Once) countdown if active
     const isCurrentlyViewing = activeContactRef.current === targetContactId;
     const incomingMsg = {
@@ -188,7 +253,7 @@ function App() {
       sender: targetContactId,
       status: 'read',
       // If currently viewing, trigger 5s burn countdown immediately
-      burnCountdown: isCurrentlyViewing ? 5 : null,
+      burnCountdown: isCurrentlyViewing && message.burnAfterRead ? 5 : null,
     };
 
     setMessages((prev) => ({
@@ -197,7 +262,7 @@ function App() {
     }));
 
     // If viewing right now, notify sender that message has been viewed
-    if (isCurrentlyViewing) {
+    if (isCurrentlyViewing && message.burnAfterRead) {
       socketService.emitMessageViewed(message.id, senderInfo.tag, 5);
     }
   }, []);
@@ -301,15 +366,10 @@ function App() {
 
       onIncomingCall: (callData) => {
         soundFX.playRing();
-        setCallActive({
-          contact: {
-            name: callData.callerInfo.username,
-            tag: callData.callerInfo.tag,
-            avatar: callData.callerInfo.avatar,
-            ip: callData.callerInfo.ip,
-            pgp: 'PGP-4096-P2P-CALL',
-          },
-          callType: callData.callType,
+        setIncomingCallAlert(callData);
+        notificationService.showDesktopNotification(`Incoming Call from ${callData.callerInfo.username}`, {
+          body: `Encrypted ${callData.callType?.toUpperCase()} Call Intercept Request`,
+          icon: callData.callerInfo.avatar || '/favicon.svg',
         });
       },
 
@@ -325,26 +385,6 @@ function App() {
       },
     });
   }, [myProfile, handleIncomingSocketMessage]);
-
-  // Contact Selection Handler (Triggers View-Once Burn on unread messages)
-  const handleSelectContact = (contact) => {
-    setActiveContactId(contact.id);
-    setContacts((prev) => prev.map((item) => item.id === contact.id ? { ...item, unreadCount: 0 } : item));
-
-    setMessages((prev) => {
-      const thread = prev[contact.id] || [];
-      let modified = false;
-      const updated = thread.map((m) => {
-        if (m.sender !== 'user' && m.burnCountdown === null && m.burnAfterRead) {
-          modified = true;
-          socketService.emitMessageViewed(m.id, contact.tag, 5);
-          return { ...m, burnCountdown: 5 };
-        }
-        return m;
-      });
-      return modified ? { ...prev, [contact.id]: updated } : prev;
-    });
-  };
 
   // Add / Start Chat with Discovered User
   const handleSelectAndAddContact = (userContact) => {
@@ -389,6 +429,49 @@ function App() {
     setContacts((prev) =>
       prev.map((c) => (c.id === targetId ? { ...c, unreadCount: 0 } : c))
     );
+  };
+
+  // Forward Message Handler
+  const handleForwardMessage = (origMessage, targetContactIdOrTag) => {
+    let targetContact = contacts.find(c => c.id === targetContactIdOrTag || c.tag === targetContactIdOrTag);
+    let targetId = targetContact?.id;
+
+    if (!targetContact) {
+      targetId = `user_${Date.now()}`;
+      const cleanTag = targetContactIdOrTag.startsWith('@') ? targetContactIdOrTag : `@${targetContactIdOrTag}`;
+      const newC = {
+        id: targetId,
+        name: cleanTag.replace(/^@/, ''),
+        tag: cleanTag,
+        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+        status: 'offline',
+        lastSeen: 'offline',
+        ip: '192.168.1.x',
+        pgp: 'PGP-4096-FORWARD-PEER',
+        unreadCount: 0,
+        pinned: false,
+        isSecret: false,
+        disappearingTimer: 0,
+        customStatus: 'Forwarded peer node',
+        bio: 'Node added from message forward dispatch.',
+      };
+      setContacts((prev) => [newC, ...prev]);
+    }
+
+    const forwardPayload = {
+      type: origMessage.type,
+      text: origMessage.text,
+      mediaUrl: origMessage.mediaUrl,
+      code: origMessage.code,
+      language: origMessage.language,
+      fileName: origMessage.fileName,
+      fileSize: origMessage.fileSize,
+      checksum: origMessage.checksum,
+      audioDuration: origMessage.audioDuration,
+      audioWaveform: origMessage.audioWaveform,
+    };
+
+    handleSendMessage(forwardPayload, targetId);
   };
 
   // Logout Handler
@@ -524,6 +607,35 @@ function App() {
     });
   };
 
+  // Accept Incoming Call
+  const handleAcceptIncomingCall = (acceptedType) => {
+    if (!incomingCallAlert) return;
+    const caller = incomingCallAlert.callerInfo;
+    const offer = incomingCallAlert.offer;
+
+    setIncomingCallAlert(null);
+    setCallActive({
+      contact: {
+        name: caller.username,
+        tag: caller.tag,
+        avatar: caller.avatar,
+        ip: caller.ip,
+        pgp: 'PGP-4096-LIVE-PEER',
+      },
+      callType: acceptedType || incomingCallAlert.callType,
+      isIncoming: true,
+      incomingOffer: offer,
+    });
+  };
+
+  // Reject Incoming Call
+  const handleRejectIncomingCall = () => {
+    if (incomingCallAlert?.callerInfo?.tag) {
+      socketService.emitCallReject(incomingCallAlert.callerInfo.tag, 'CALL_DECLINED_BY_OPERATOR');
+    }
+    setIncomingCallAlert(null);
+  };
+
   // IF USER IS NOT LOGGED IN -> RENDER TERMINAL LOGIN GATEWAY FIRST!
   if (!myProfile) {
     return (
@@ -537,6 +649,9 @@ function App() {
   return (
     <div className={`chatforge-app-root ${gbSettings.scanlinesEnabled ? 'crt-scanlines' : ''}`}>
       
+      {/* Toast Notification Container */}
+      <ToastNotification />
+
       {/* Background Matrix Effect */}
       <MatrixBackground enabled={gbSettings.matrixRainBg} color={THEMES[theme]?.accent || '#00ff66'} />
 
@@ -587,9 +702,13 @@ function App() {
           onReactMessage={handleReactMessage}
           onDeleteForEveryone={handleDeleteForEveryone}
           onDeleteForMe={handleDeleteForMe}
-          onStartCall={(contact, type) => setCallActive({ contact, callType: type })}
+          onStartCall={(contact, type) => setCallActive({ contact, callType: type, isIncoming: false })}
           onUpdateContactDisappearing={handleUpdateContactDisappearing}
           onBurnShredMessage={handleBurnShredMessage}
+          onOpenEncryptionModal={(c) => setEncryptionModalContact(c)}
+          onOpenMediaVault={(c) => setMediaVaultContact(c)}
+          onOpenMediaViewer={(m) => setMediaViewerItem(m)}
+          onForwardMessage={(m) => setForwardingMessage(m)}
           isTyping={typingStatus[activeContact?.id]}
           gbSettings={gbSettings}
           onClearThread={handleClearThread}
@@ -637,16 +756,65 @@ function App() {
         />
       )}
 
-      {/* 3. Encrypted P2P Voice / Video Call */}
+      {/* 3. Incoming Call Ringing Alert */}
+      {incomingCallAlert && (
+        <IncomingCallAlert
+          callData={incomingCallAlert}
+          onAccept={handleAcceptIncomingCall}
+          onReject={handleRejectIncomingCall}
+        />
+      )}
+
+      {/* 4. Active Encrypted P2P Voice / Video WebRTC Call */}
       {callActive && (
         <CallModal
           contact={callActive.contact}
           callType={callActive.callType}
+          isIncoming={callActive.isIncoming}
+          incomingOffer={callActive.incomingOffer}
           onClose={() => setCallActive(null)}
         />
       )}
 
-      {/* 4. Status / Story Viewer */}
+      {/* 5. Full-Screen Photo & Video Media Viewer / Lightbox */}
+      {mediaViewerItem && (
+        <MediaViewerModal
+          media={mediaViewerItem}
+          onClose={() => setMediaViewerItem(null)}
+          onBurnShred={(msgId) => handleBurnShredMessage(msgId)}
+        />
+      )}
+
+      {/* 6. Media & Payload Vault Drawer */}
+      {mediaVaultContact && (
+        <MediaGalleryModal
+          contact={mediaVaultContact}
+          messages={messages[mediaVaultContact.id] || []}
+          onClose={() => setMediaVaultContact(null)}
+          onOpenMedia={(item) => setMediaViewerItem(item)}
+        />
+      )}
+
+      {/* 7. E2EE Security & Safety Number Matrix Inspector */}
+      {encryptionModalContact && (
+        <EncryptionModal
+          myProfile={myProfile}
+          contact={encryptionModalContact}
+          onClose={() => setEncryptionModalContact(null)}
+        />
+      )}
+
+      {/* 8. Message Forwarding Modal */}
+      {forwardingMessage && (
+        <ForwardModal
+          message={forwardingMessage}
+          contacts={contacts}
+          onClose={() => setForwardingMessage(null)}
+          onForwardMessage={handleForwardMessage}
+        />
+      )}
+
+      {/* 9. Status / Story Viewer */}
       {activeStoryId && (
         <StatusViewerModal
           stories={stories}
@@ -657,7 +825,7 @@ function App() {
         />
       )}
 
-      {/* 5. Direct Message to Unsaved Username/IP */}
+      {/* 10. Direct Message to Unsaved Username/IP */}
       {showDirectChatModal && (
         <DirectChatModal
           onClose={() => setShowDirectChatModal(false)}
@@ -665,7 +833,7 @@ function App() {
         />
       )}
 
-      {/* 6. Mass Message Broadcast Blaster */}
+      {/* 11. Mass Message Broadcast Blaster */}
       {showBroadcastModal && (
         <BroadcastModal
           contacts={contacts}
@@ -674,7 +842,7 @@ function App() {
         />
       )}
 
-      {/* 7. Message Scheduler */}
+      {/* 12. Message Scheduler */}
       {showScheduleModal && (
         <ScheduleModal
           contacts={contacts}
@@ -684,7 +852,7 @@ function App() {
         />
       )}
 
-      {/* 8. Operator Profile & Multi-Device Pairing */}
+      {/* 13. Operator Profile & Multi-Device Pairing */}
       {showProfileModal && (
         <ProfileModal
           currentProfile={myProfile}
@@ -697,7 +865,7 @@ function App() {
         />
       )}
 
-      {/* 9. Global Username Search Modal */}
+      {/* 14. Global Username Search Modal */}
       {showSearchUserModal && (
         <SearchUserModal
           currentProfile={myProfile}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Check, 
   CheckCheck, 
@@ -13,13 +13,16 @@ import {
   MoreVertical, 
   Trash2, 
   Smile,
-  Flame,
-  Clock,
-  Radio
+  Flame, 
+  Clock, 
+  Radio, 
+  Maximize2, 
+  CornerUpRight, 
+  Lock 
 } from 'lucide-react';
 import { soundFX } from '../services/audioService';
 
-const REACTION_EMOJIS = ['⚡', '🔥', '💀', '👾', '🛡️', '👁️', '💻'];
+const REACTION_EMOJIS = ['⚡', '🔥', '💀', '👾', '🛡️', '👁️', '💻', '❤️', '👍', '🚀'];
 
 const MessageItem = ({ 
   message, 
@@ -28,6 +31,8 @@ const MessageItem = ({
   onDeleteForEveryone, 
   onDeleteForMe, 
   onReply,
+  onForward,
+  onOpenMedia,
   onBurnShredMessage,
   gbSettings 
 }) => {
@@ -36,17 +41,20 @@ const MessageItem = ({
   const [showMenu, setShowMenu] = useState(false);
   const [showReactPicker, setShowReactPicker] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isViewOnceRevealed, setIsViewOnceRevealed] = useState(!message.burnAfterRead);
   
   // Burn countdown state
   const [burnSecondsRemaining, setBurnSecondsRemaining] = useState(
     message.burnCountdown !== undefined ? message.burnCountdown : null
   );
 
+  const audioElemRef = useRef(null);
+
   // Active burn-after-read countdown timer
   useEffect(() => {
     if (burnSecondsRemaining !== null && burnSecondsRemaining > 0) {
       const timer = setTimeout(() => {
-        setBurnSecondsRemaining(prev => prev - 1);
+        setBurnSecondsRemaining((prev) => prev - 1);
       }, 1000);
       return () => clearTimeout(timer);
     } else if (burnSecondsRemaining === 0) {
@@ -66,12 +74,28 @@ const MessageItem = ({
 
   const toggleAudioPlay = () => {
     soundFX.playKeypress();
-    setIsPlayingAudio(!isPlayingAudio);
-    if (!isPlayingAudio) {
-      soundFX.playBeep(440, 'triangle', 0.1);
-      setTimeout(() => {
+    if (audioElemRef.current) {
+      if (isPlayingAudio) {
+        audioElemRef.current.pause();
         setIsPlayingAudio(false);
-      }, 5000 / audioSpeed);
+      } else {
+        audioElemRef.current.playbackRate = audioSpeed;
+        audioElemRef.current.play()
+          .then(() => setIsPlayingAudio(true))
+          .catch(() => {
+            // Audio simulation fallback
+            setIsPlayingAudio(true);
+            setTimeout(() => setIsPlayingAudio(false), 4000 / audioSpeed);
+          });
+      }
+    } else {
+      setIsPlayingAudio(!isPlayingAudio);
+      if (!isPlayingAudio) {
+        soundFX.playBeep(440, 'triangle', 0.1);
+        setTimeout(() => {
+          setIsPlayingAudio(false);
+        }, 5000 / audioSpeed);
+      }
     }
   };
 
@@ -81,6 +105,9 @@ const MessageItem = ({
     const speeds = [1, 1.5, 2];
     const next = speeds[(speeds.indexOf(audioSpeed) + 1) % speeds.length];
     setAudioSpeed(next);
+    if (audioElemRef.current) {
+      audioElemRef.current.playbackRate = next;
+    }
   };
 
   const getStatusIcon = () => {
@@ -92,13 +119,21 @@ const MessageItem = ({
         </span>
       );
     }
-    if (message.status === 'read' && !gbSettings.hideBlueTicks) {
+    if (message.status === 'read' && !gbSettings?.hideBlueTicks) {
       return <CheckCheck size={14} className="tick-read" />;
     }
     if (message.status === 'delivered' || message.status === 'read') {
       return <CheckCheck size={14} className="tick-delivered" />;
     }
     return <Check size={14} className="tick-sent" />;
+  };
+
+  const handleRevealViewOnce = () => {
+    soundFX.playKeypress();
+    setIsViewOnceRevealed(true);
+    if (burnSecondsRemaining === null) {
+      setBurnSecondsRemaining(5);
+    }
   };
 
   return (
@@ -124,7 +159,7 @@ const MessageItem = ({
         )}
 
         {/* Anti-Delete Revoked Badge */}
-        {message.isDeletedBySender && gbSettings.antiDeleteMessages && (
+        {message.isDeletedBySender && gbSettings?.antiDeleteMessages && (
           <div className="revoked-header">
             <ShieldAlert size={14} className="revoked-icon" />
             <span className="revoked-text">ANTI-DELETE ENGINE: SENDER REVOKED THIS MESSAGE AT {message.deletedAt || 'REC'}</span>
@@ -139,11 +174,68 @@ const MessageItem = ({
           </div>
         )}
 
-        {/* Message Content according to type */}
-        {message.type === 'code' ? (
+        {/* 1. IMAGE MESSAGE PAYLOAD */}
+        {message.type === 'image' ? (
+          <div className="media-message-bubble image-bubble">
+            {message.burnAfterRead && !isViewOnceRevealed && !gbSettings?.antiViewOnce ? (
+              <div className="view-once-shield" onClick={handleRevealViewOnce}>
+                <Lock size={24} className="text-warning" />
+                <span className="shield-title">VIEW-ONCE ENCRYPTED PHOTO</span>
+                <span className="shield-sub">Click to unlock & initiate 5s shred countdown</span>
+              </div>
+            ) : (
+              <div className="media-image-container" onClick={() => onOpenMedia && onOpenMedia(message)}>
+                <img 
+                  src={message.mediaUrl} 
+                  alt={message.fileName || 'Encrypted visual payload'} 
+                  className="chat-photo-img" 
+                  loading="lazy"
+                />
+                <div className="media-hover-overlay">
+                  <Maximize2 size={18} />
+                  <span>EXPAND INSPECTION</span>
+                </div>
+              </div>
+            )}
+            {message.text && message.text !== 'Encrypted image payload' && (
+              <p className="bubble-text media-caption">{message.text}</p>
+            )}
+          </div>
+        ) : 
+
+        /* 2. VIDEO MESSAGE PAYLOAD */
+        message.type === 'video' ? (
+          <div className="media-message-bubble video-bubble">
+            {message.burnAfterRead && !isViewOnceRevealed && !gbSettings?.antiViewOnce ? (
+              <div className="view-once-shield" onClick={handleRevealViewOnce}>
+                <Lock size={24} className="text-warning" />
+                <span className="shield-title">VIEW-ONCE ENCRYPTED VIDEO</span>
+                <span className="shield-sub">Click to unlock & stream</span>
+              </div>
+            ) : (
+              <div className="media-video-container" onClick={() => onOpenMedia && onOpenMedia(message)}>
+                <video 
+                  src={message.mediaUrl} 
+                  className="chat-video-elem"
+                  preload="metadata"
+                />
+                <div className="video-play-overlay">
+                  <Play size={24} />
+                  <span>PLAY STREAM</span>
+                </div>
+              </div>
+            )}
+            {message.text && message.text !== 'Encrypted video stream' && (
+              <p className="bubble-text media-caption">{message.text}</p>
+            )}
+          </div>
+        ) : 
+
+        /* 3. CODE SNIPPET PAYLOAD */
+        message.type === 'code' ? (
           <div className="code-block-wrapper">
             <div className="code-header">
-              <span className="code-lang"><FileCode size={12} /> {message.language || 'PYTHON'}</span>
+              <span className="code-lang"><FileCode size={12} /> {message.language || 'JAVASCRIPT'}</span>
               <button className="code-copy-btn" onClick={() => handleCopy(message.code)}>
                 <Copy size={12} />
                 <span>{copied ? 'COPIED!' : 'EXTRACT'}</span>
@@ -154,8 +246,19 @@ const MessageItem = ({
             </pre>
             {message.text && <p className="bubble-text code-caption">{message.text}</p>}
           </div>
-        ) : message.type === 'audio' ? (
+        ) : 
+
+        /* 4. AUDIO / VOICE INTERCEPT PAYLOAD */
+        message.type === 'audio' ? (
           <div className="audio-voice-player">
+            {message.mediaUrl && (
+              <audio 
+                ref={audioElemRef} 
+                src={message.mediaUrl} 
+                onEnded={() => setIsPlayingAudio(false)} 
+              />
+            )}
+            
             <button className="audio-play-btn" onClick={toggleAudioPlay}>
               {isPlayingAudio ? <Pause size={16} /> : <Play size={16} />}
             </button>
@@ -180,7 +283,10 @@ const MessageItem = ({
               </button>
             </div>
           </div>
-        ) : message.type === 'file' ? (
+        ) : 
+
+        /* 5. GENERIC FILE / ENCRYPTED BINARY PAYLOAD */
+        message.type === 'file' ? (
           <div className="file-payload-box">
             <div className="file-icon-box">
               <FileText size={22} />
@@ -190,15 +296,31 @@ const MessageItem = ({
               <span className="file-meta">{message.fileSize} • SHA-256</span>
               <span className="file-hash">{message.checksum?.substring(0, 16)}...</span>
             </div>
-            <button className="file-download-btn" onClick={() => handleCopy(message.checksum)}>
+            <button 
+              className="file-download-btn" 
+              onClick={() => {
+                if (message.mediaUrl) {
+                  const a = document.createElement('a');
+                  a.href = message.mediaUrl;
+                  a.download = message.fileName || 'file_payload.bin';
+                  document.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                } else {
+                  handleCopy(message.checksum);
+                }
+              }}
+              title="Download Payload"
+            >
               <Download size={15} />
             </button>
           </div>
         ) : (
+          /* 6. STANDARD ENCRYPTED TEXT */
           <p className="bubble-text">{message.text}</p>
         )}
 
-        {/* Bubble Meta (Time, Ticks, Actions) */}
+        {/* Bubble Meta (Time, Ticks, Quick Actions) */}
         <div className="bubble-footer">
           <div className="bubble-actions-trigger">
             <button 
@@ -256,7 +378,10 @@ const MessageItem = ({
             <button onClick={() => { soundFX.playKeypress(); onReply(message); setShowMenu(false); }}>
               <CornerUpLeft size={12} /> Reply
             </button>
-            <button onClick={() => { handleCopy(message.text || message.code); setShowMenu(false); }}>
+            <button onClick={() => { soundFX.playKeypress(); if (onForward) onForward(message); setShowMenu(false); }}>
+              <CornerUpRight size={12} /> Forward
+            </button>
+            <button onClick={() => { handleCopy(message.text || message.code || message.mediaUrl); setShowMenu(false); }}>
               <Copy size={12} /> Copy Payload
             </button>
             {isUser && (

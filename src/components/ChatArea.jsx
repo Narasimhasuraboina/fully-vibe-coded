@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Phone, 
   Video, 
-  Shield, 
+  ShieldCheck, 
   Lock, 
   Search, 
   MoreVertical, 
@@ -12,7 +12,8 @@ import {
   Terminal, 
   Zap, 
   Radio, 
-  X
+  X, 
+  FolderLock 
 } from 'lucide-react';
 import MessageItem from './MessageItem';
 import MessageInput from './MessageInput';
@@ -28,6 +29,10 @@ const ChatArea = ({
   onStartCall,
   onUpdateContactDisappearing,
   onBurnShredMessage,
+  onOpenEncryptionModal,
+  onOpenMediaVault,
+  onOpenMediaViewer,
+  onForwardMessage,
   isTyping,
   gbSettings,
   onClearThread
@@ -52,7 +57,7 @@ const ChatArea = ({
 
   if (!activeContact) {
     return (
-      <div className="chatarea empty-state">
+      <main className="chatarea empty-state">
         <div className="empty-content">
           <div className="radar-glow">
             <Terminal size={48} className="text-accent" />
@@ -63,26 +68,30 @@ const ChatArea = ({
           </p>
           <div className="quick-intel-cards">
             <div className="intel-card">
-              <Shield size={16} className="text-accent" />
+              <ShieldCheck size={16} className="text-accent" />
               <span>Quantum-Resistant AES-256 GCM</span>
             </div>
             <div className="intel-card">
               <Radio size={16} className="text-accent" />
-              <span>GB Anti-Delete Interceptor Active</span>
+              <span>Real-Time WebRTC P2P Video & Voice Calls</span>
             </div>
             <div className="intel-card">
               <Zap size={16} className="text-accent" />
-              <span>Multi-Hop Relay Anonymization</span>
+              <span>Zero-Knowledge Media Vault & Ephemeral Shredder</span>
             </div>
           </div>
         </div>
-      </div>
+      </main>
     );
   }
 
   // Filter messages by in-chat search if active
   const displayedMessages = searchTerm.trim()
-    ? currentMessages.filter(m => (m.text || '').toLowerCase().includes(searchTerm.toLowerCase()) || (m.code || '').toLowerCase().includes(searchTerm.toLowerCase()))
+    ? currentMessages.filter((m) =>
+        (m.text || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (m.code || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (m.fileName || '').toLowerCase().includes(searchTerm.toLowerCase())
+      )
     : currentMessages;
 
   const setTimer = (seconds) => {
@@ -125,8 +134,8 @@ const ChatArea = ({
             </div>
 
             <div className="intel-meta-row">
-              <span className="meta-ip">IP: {activeContact.ip}</span>
-              <span className="meta-pgp">KEY: {activeContact.pgp}</span>
+              <span className="meta-ip">IP: {activeContact.ip || '192.168.1.100'}</span>
+              <span className="meta-pgp">KEY: {activeContact.pgp || 'PGP-4096-SEC'}</span>
               <span className="meta-seen">{activeContact.status === 'online' ? '● ONLINE' : `LAST SEEN: ${activeContact.lastSeen}`}</span>
             </div>
           </div>
@@ -134,6 +143,24 @@ const ChatArea = ({
 
         {/* Header Action Tools */}
         <div className="chatarea-actions">
+          {/* E2EE Security Cipher Inspector */}
+          <button 
+            className="action-icon-btn e2ee-btn"
+            onClick={() => onOpenEncryptionModal && onOpenEncryptionModal(activeContact)}
+            title="Inspect E2EE Cipher & Safety Numbers"
+          >
+            <ShieldCheck size={17} className="text-accent" />
+          </button>
+
+          {/* Session Media Vault Drawer */}
+          <button 
+            className="action-icon-btn"
+            onClick={() => onOpenMediaVault && onOpenMediaVault(activeContact)}
+            title="Open Chat Media & Payload Vault"
+          >
+            <FolderLock size={17} />
+          </button>
+
           {/* Voice Call */}
           <button 
             className="action-icon-btn" 
@@ -238,8 +265,8 @@ const ChatArea = ({
       {/* Messages Scroll Feed */}
       <div className="messages-feed">
         <div className="encryption-notice-bubble">
-          <Shield size={14} />
-          <span>Messages and calls are end-to-end encrypted with RSA-4096 and P2P Quantum Lattice. No third party or relay node can intercept.</span>
+          <ShieldCheck size={14} className="text-accent" />
+          <span>AES-256 GCM Quantum-Resistant Session Active. Messages, voice memos, images, videos & calls are encrypted end-to-end.</span>
         </div>
 
         {displayedMessages.map((msg) => (
@@ -251,6 +278,8 @@ const ChatArea = ({
             onDeleteForEveryone={onDeleteForEveryone}
             onDeleteForMe={onDeleteForMe}
             onReply={(m) => setReplyingTo(m)}
+            onForward={onForwardMessage}
+            onOpenMedia={onOpenMediaViewer}
             onBurnShredMessage={onBurnShredMessage}
             gbSettings={gbSettings}
           />

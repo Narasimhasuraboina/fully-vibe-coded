@@ -14,10 +14,12 @@ const DB_FILE = path.join(__dirname, 'users_db.json');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const server = http.createServer(app);
 const io = new Server(server, {
+  maxHttpBufferSize: 1e8, // 100MB for media payloads
   cors: {
     origin: '*',
     methods: ['GET', 'POST'],
@@ -347,6 +349,8 @@ io.on('connection', (socket) => {
         callType: data.callType,
         offer: data.offer,
       });
+    } else {
+      socket.emit('call_rejected_signal', { reason: 'PEER_UNREACHABLE_OR_OFFLINE' });
     }
   });
 
@@ -355,6 +359,25 @@ io.on('connection', (socket) => {
     if (caller && caller.socketId) {
       io.to(caller.socketId).emit('call_answered_signal', {
         answer: data.answer,
+      });
+    }
+  });
+
+  socket.on('ice_candidate', (data) => {
+    const target = registeredUsers.get(data.targetTag?.toLowerCase());
+    if (target && target.socketId) {
+      io.to(target.socketId).emit('ice_candidate_signal', {
+        candidate: data.candidate,
+        fromTag: socket.userTag,
+      });
+    }
+  });
+
+  socket.on('call_reject', (data) => {
+    const caller = registeredUsers.get(data.callerTag?.toLowerCase());
+    if (caller && caller.socketId) {
+      io.to(caller.socketId).emit('call_rejected_signal', {
+        reason: data.reason || 'CALL_DECLINED_BY_PEER',
       });
     }
   });

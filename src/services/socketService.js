@@ -144,6 +144,14 @@ class RealtimeSocketService {
       if (callbacks.onCallAnswered) callbacks.onCallAnswered(data);
     });
 
+    this.socket.on('ice_candidate_signal', (data) => {
+      if (callbacks.onIceCandidate) callbacks.onIceCandidate(data);
+    });
+
+    this.socket.on('call_rejected_signal', (data) => {
+      if (callbacks.onCallRejected) callbacks.onCallRejected(data);
+    });
+
     this.socket.on('call_ended_signal', () => {
       if (callbacks.onCallEnded) callbacks.onCallEnded();
     });
@@ -215,6 +223,18 @@ class RealtimeSocketService {
   emitCallAnswer(callerTag, answer) {
     if (this.socket && this.isConnected) {
       this.socket.emit('call_answer', { callerTag, answer });
+    }
+  }
+
+  emitIceCandidate(targetTag, candidate) {
+    if (this.socket && this.isConnected) {
+      this.socket.emit('ice_candidate', { targetTag, candidate });
+    }
+  }
+
+  emitCallReject(callerTag, reason = 'CALL_DECLINED') {
+    if (this.socket && this.isConnected) {
+      this.socket.emit('call_reject', { callerTag, reason });
     }
   }
 
