@@ -213,6 +213,28 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const existing = registeredUsers.get(tag);
+
+    // If session reconnect without password for an existing registered operator
+    if ((!password || password.length < 4) && existing) {
+      socket.join(tag);
+      existing.socketId = socket.id;
+      existing.status = 'online';
+      existing.lastSeen = 'online';
+      existing.ip = clientIP;
+      socket.userTag = tag;
+      saveUserDatabase();
+      console.log(`[SESSION RESUMED] Operator ${cleanUser} (${tag}) re-attached socket ${socket.id}.`);
+
+      const safeUser = sanitizeUser(existing);
+      const resp = { success: true, peerInfo: safeUser, localIP };
+      if (typeof callback === 'function') callback(resp);
+      socket.emit('registered', resp);
+      deliverPendingMailboxMessages(tag, socket);
+      socket.broadcast.emit('peer_online_event', { peer: safeUser, timestamp: Date.now() });
+      return;
+    }
+
     if (!password || password.length < 4) {
       const resp = { success: false, error: 'Password must be at least 4 characters.' };
       if (typeof callback === 'function') callback(resp);
@@ -220,7 +242,6 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const existing = registeredUsers.get(tag);
     const passwordHash = hashPassword(password);
 
     if (existing) {
@@ -359,11 +380,34 @@ io.on('connection', (socket) => {
 
   // 3. Relay Message Protocol with Room-based Delivery & Store-and-Forward Encrypted Mailbox
   socket.on('send_message', (payload) => {
-    const sender = socket.userTag ? registeredUsers.get(normalizeTag(socket.userTag)) : null;
+    let senderTag = socket.userTag;
+    if (!senderTag && payload.senderTag) {
+      senderTag = normalizeTag(payload.senderTag);
+      socket.userTag = senderTag;
+      socket.join(senderTag);
+    }
+    if (!senderTag && payload.message?.senderTag) {
+      senderTag = normalizeTag(payload.message.senderTag);
+      socket.userTag = senderTag;
+      socket.join(senderTag);
+    }
+
+    let sender = senderTag ? registeredUsers.get(normalizeTag(senderTag)) : null;
+    if (!sender && senderTag) {
+      sender = {
+        username: senderTag.replace(/^@/, ''),
+        tag: senderTag,
+        status: 'online',
+        socketId: socket.id,
+        avatar: payload.senderAvatar || `https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80`,
+      };
+      registeredUsers.set(senderTag, sender);
+    }
     if (!sender) return;
 
     const { recipientTag, message } = payload;
     const cleanRecipientTag = normalizeTag(recipientTag);
+    if (!cleanRecipientTag) return;
 
     // Check if recipient has an active connected socket in their room
     const recipientRoom = io.sockets.adapter.rooms.get(cleanRecipientTag);

@@ -182,6 +182,8 @@ class RealtimeSocketService {
 
     this.socket.emit('send_message', {
       recipientTag,
+      senderTag: this.currentProfile?.tag,
+      senderAvatar: this.currentProfile?.avatar,
       message,
     });
     return true;

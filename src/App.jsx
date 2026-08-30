@@ -210,15 +210,18 @@ function App() {
   // Real-time Message Reception Handler
   const handleIncomingSocketMessage = useCallback((payload) => {
     const { message, senderInfo } = payload;
+    if (!message) return;
     soundFX.playReceived();
 
-    const cleanSenderTag = senderInfo?.tag?.toLowerCase()?.trim() || '';
-    const cleanSenderUser = senderInfo?.username?.toLowerCase()?.trim() || '';
+    const senderUsername = senderInfo?.username || 'Peer';
+    const cleanSenderTag = (senderInfo?.tag || `@${senderUsername}`).toLowerCase().trim();
+    const cleanSenderUser = senderUsername.toLowerCase().trim().replace(/^@/, '');
 
     // Check if sender exists in contacts (case-insensitive match)
     let senderContact = contactsRef.current.find((c) => 
       (c.tag && c.tag.toLowerCase().trim() === cleanSenderTag) || 
-      (c.name && c.name.toLowerCase().trim() === cleanSenderUser)
+      (c.name && c.name.toLowerCase().trim() === cleanSenderUser) ||
+      (c.id && (c.id === `peer_${cleanSenderUser}` || c.id.toLowerCase() === cleanSenderTag))
     );
     let targetContactId = senderContact?.id;
 
@@ -226,18 +229,18 @@ function App() {
       targetContactId = `peer_${cleanSenderUser || Date.now()}`;
       senderContact = {
         id: targetContactId,
-        name: senderInfo.username,
-        tag: senderInfo.tag || `@${cleanSenderUser}`,
-        avatar: senderInfo.avatar,
+        name: senderUsername,
+        tag: cleanSenderTag,
+        avatar: senderInfo?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
         status: 'online',
         lastSeen: 'online',
-        ip: senderInfo.ip || '192.168.1.x',
+        ip: senderInfo?.ip || '192.168.1.x',
         pgp: 'PGP-4096-LIVE-PEER',
         unreadCount: 1,
         pinned: false,
         isSecret: false,
         disappearingTimer: 0,
-        customStatus: senderInfo.customStatus || 'Connected Live Peer Node',
+        customStatus: senderInfo?.customStatus || 'Connected Live Peer Node',
         bio: 'Real-time connected client device on mesh relay.',
       };
       setContacts((prev) => [senderContact, ...prev]);
@@ -254,7 +257,7 @@ function App() {
                 ...c,
                 status: 'online',
                 lastSeen: 'online',
-                avatar: senderInfo.avatar || c.avatar,
+                avatar: senderInfo?.avatar || c.avatar,
                 unreadCount: isCurrentlyViewing ? 0 : (c.unreadCount || 0) + 1,
               }
             : c
@@ -270,14 +273,20 @@ function App() {
       burnCountdown: isCurrentlyViewing && message.burnAfterRead ? 5 : null,
     };
 
-    setMessages((prev) => ({
-      ...prev,
-      [targetContactId]: [...(prev[targetContactId] || []), incomingMsg],
-    }));
+    setMessages((prev) => {
+      const currentThread = prev[targetContactId] || [];
+      if (currentThread.some((m) => m.id === incomingMsg.id)) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [targetContactId]: [...currentThread, incomingMsg],
+      };
+    });
 
     // Auto-view signal if recipient is actively reading this chat
     if (isCurrentlyViewing && message.burnAfterRead) {
-      socketService.emitMessageViewed(message.id, senderInfo.tag, 5);
+      socketService.emitMessageViewed(message.id, senderInfo?.tag || cleanSenderTag, 5);
     }
 
     // Push Desktop & HUD Toast Notification
