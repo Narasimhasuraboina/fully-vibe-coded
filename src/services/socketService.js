@@ -41,13 +41,20 @@ class RealtimeSocketService {
 
   // Authenticate / Register with Password
   authenticateUser(authData, callback) {
-    const sock = this.initSocket();
+    if (!this.socket) {
+      const serverUrl = this.getServerUrl();
+      this.socket = io(serverUrl, {
+        transports: ['websocket', 'polling'],
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000,
+      });
+    }
 
-    if (sock.connected) {
-      sock.emit('authenticate_user', authData, callback);
+    if (this.socket.connected) {
+      this.socket.emit('authenticate_user', authData, callback);
     } else {
-      sock.once('connect', () => {
-        sock.emit('authenticate_user', authData, callback);
+      this.socket.once('connect', () => {
+        this.socket.emit('authenticate_user', authData, callback);
       });
     }
   }
@@ -182,21 +189,27 @@ class RealtimeSocketService {
 
   // Search registered users by username
   searchUsers(query, callback) {
-    const sock = this.initSocket();
-    if (sock && (this.isConnected || sock.connected)) {
-      sock.emit('search_users', { query }, (results) => {
+    if (!query || !query.trim()) {
+      if (typeof callback === 'function') callback([]);
+      return;
+    }
+
+    if (this.socket && (this.isConnected || this.socket.connected)) {
+      this.socket.emit('search_users', { query: query.trim() }, (results) => {
         if (typeof callback === 'function') {
-          callback(results);
+          callback(results || []);
         }
       });
-    } else {
-      sock.once('connect', () => {
-        sock.emit('search_users', { query }, (results) => {
+    } else if (this.socket) {
+      this.socket.once('connect', () => {
+        this.socket.emit('search_users', { query: query.trim() }, (results) => {
           if (typeof callback === 'function') {
-            callback(results);
+            callback(results || []);
           }
         });
       });
+    } else {
+      if (typeof callback === 'function') callback([]);
     }
   }
 

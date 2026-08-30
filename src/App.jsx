@@ -159,8 +159,24 @@ function App() {
 
   // Contact Selection Handler (Triggers View-Once Burn on unread messages)
   const handleSelectContact = (contact) => {
+    if (!contact) return;
+
+    setContacts((prev) => {
+      const exists = prev.some(
+        (item) => item.id === contact.id || (contact.tag && item.tag?.toLowerCase() === contact.tag.toLowerCase())
+      );
+      if (exists) {
+        return prev.map((item) =>
+          (item.id === contact.id || (contact.tag && item.tag?.toLowerCase() === contact.tag.toLowerCase()))
+            ? { ...item, ...contact, unreadCount: 0 }
+            : item
+        );
+      }
+      // Add newly selected/discovered contact into contacts list
+      return [contact, ...prev];
+    });
+
     setActiveContactId(contact.id);
-    setContacts((prev) => prev.map((item) => item.id === contact.id ? { ...item, unreadCount: 0 } : item));
 
     setMessages((prev) => {
       const thread = prev[contact.id] || [];

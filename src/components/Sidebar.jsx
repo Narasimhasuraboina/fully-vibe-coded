@@ -47,9 +47,7 @@ const Sidebar = ({
   // Live network search as user types a codename
   useEffect(() => {
     const query = searchQuery.trim().toLowerCase().replace(/^@/, '');
-    if (!query) {
-      return;
-    }
+    if (!query) return;
 
     const debounceTimer = setTimeout(() => {
       socketService.searchUsers(query, (results) => {
@@ -59,7 +57,7 @@ const Sidebar = ({
         );
         setNetworkResults(notInContacts);
       });
-    }, 250);
+    }, 150);
 
     return () => clearTimeout(debounceTimer);
   }, [searchQuery, contacts]);

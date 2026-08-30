@@ -10,10 +10,7 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
 
   useEffect(() => {
     const query = searchQuery.trim().toLowerCase().replace(/^@/, '');
-    
-    if (!query) {
-      return;
-    }
+    if (!query) return;
 
     const debounceTimer = setTimeout(() => {
       setIsSearching(true);
@@ -23,7 +20,7 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
         setSearchResults(filtered);
         setIsSearching(false);
       });
-    }, 200);
+    }, 150);
 
     return () => clearTimeout(debounceTimer);
   }, [searchQuery, currentProfile?.tag]);
