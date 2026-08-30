@@ -160,8 +160,8 @@ function App() {
     root.style.setProperty('--font-main', currentTheme.font);
   }, [theme]);
 
-  // Active Contact Object
-  const activeContact = contacts.find((c) => c.id === activeContactId) || contacts[0] || null;
+  // Active Contact Object (null when user is viewing contacts matrix on mobile)
+  const activeContact = activeContactId ? (contacts.find((c) => c.id === activeContactId) || null) : null;
 
   // Contact Selection Handler (Triggers View-Once Burn on unread messages)
   const handleSelectContact = (contact) => {
@@ -262,7 +262,7 @@ function App() {
         bio: 'Real-time connected client device on mesh relay.',
       };
       setContacts((prev) => [senderContact, ...prev]);
-      if (!activeContactRef.current) {
+      if (!activeContactRef.current && typeof window !== 'undefined' && window.innerWidth >= 768) {
         setActiveContactId(targetContactId);
       }
     } else {
