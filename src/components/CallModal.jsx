@@ -188,14 +188,22 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
             inboundStream.addTrack(event.track);
           }
 
-          if (event.track.kind === 'video') {
-            setHasRemoteVideo(true);
-          }
+          const attachRemote = () => {
+            if (event.track.kind === 'video') {
+              setHasRemoteVideo(true);
+            }
+            if (remoteVideoRef.current) {
+              remoteVideoRef.current.srcObject = inboundStream;
+              remoteVideoRef.current.play().catch((e) => console.warn('[WEBRTC] remote play:', e));
+            }
+          };
 
-          if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = inboundStream;
-            remoteVideoRef.current.play().catch((e) => console.warn('[WEBRTC] remote play:', e));
-          }
+          attachRemote();
+          event.track.onunmute = attachRemote;
+          event.track.onended = () => {
+            if (event.track.kind === 'video') setHasRemoteVideo(false);
+          };
+
           setCallStatus('CONNECTED // AES-256 QUANTUM LINK');
         };
 
@@ -284,8 +292,12 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
           socketService.emitCallAnswer(contact.tag, answer, callerSocketId);
           setCallStatus('CONNECTED // AES-256 QUANTUM LINK');
         } else {
-          // Outgoing Call Initiation
-          const offer = await pc.createOffer();
+          // Outgoing Call Initiation with explicit offerToReceiveVideo
+          const offerOptions = {
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: callType === 'video',
+          };
+          const offer = await pc.createOffer(offerOptions);
           await pc.setLocalDescription(offer);
           socketService.emitCallOffer(contact.tag, callType, offer);
           soundFX.playRing();

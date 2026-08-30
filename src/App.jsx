@@ -70,9 +70,18 @@ function App() {
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [serverInfo, setServerInfo] = useState(null);
 
-  // State Initialization
-  const [contacts, setContacts] = useState(() => loadState('contacts', INITIAL_CONTACTS));
-  const [messages, setMessages] = useState(() => loadState('messages', INITIAL_MESSAGES));
+  // User-scoped account key
+  const userKey = myProfile?.tag ? myProfile.tag.toLowerCase().replace(/^@/, '') : null;
+
+  // State Initialization (Scoped to active user account)
+  const [contacts, setContacts] = useState(() => {
+    const raw = userKey ? loadState(`contacts_${userKey}`, INITIAL_CONTACTS) : [];
+    return raw || [];
+  });
+  const [messages, setMessages] = useState(() => {
+    const raw = userKey ? loadState(`messages_${userKey}`, INITIAL_MESSAGES) : {};
+    return raw || {};
+  });
   const [stories, setStories] = useState(() => loadState('stories', INITIAL_STORIES));
   const [autoReplies, setAutoReplies] = useState(() => loadState('auto_replies', INITIAL_AUTO_REPLIES));
   const [scheduledMessages, setScheduledMessages] = useState(() => loadState('scheduled', INITIAL_SCHEDULED));
@@ -84,10 +93,26 @@ function App() {
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
       return null;
     }
-    const savedContacts = loadState('contacts', INITIAL_CONTACTS);
+    const savedContacts = userKey ? loadState(`contacts_${userKey}`, INITIAL_CONTACTS) : [];
     return savedContacts[0]?.id || null;
   });
   const [typingStatus, setTypingStatus] = useState({}); // { [contactId]: boolean }
+
+  // Switch account data cleanly when logged-in profile changes
+  useEffect(() => {
+    if (myProfile?.tag) {
+      const uKey = myProfile.tag.toLowerCase().replace(/^@/, '');
+      const userContacts = loadState(`contacts_${uKey}`, INITIAL_CONTACTS) || [];
+      const userMessages = loadState(`messages_${uKey}`, INITIAL_MESSAGES) || {};
+      setContacts(userContacts);
+      setMessages(userMessages);
+      setActiveContactId(userContacts[0]?.id || null);
+    } else {
+      setContacts([]);
+      setMessages({});
+      setActiveContactId(null);
+    }
+  }, [myProfile?.tag]);
 
   // Modals & Panels
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
@@ -96,8 +121,8 @@ function App() {
   const [showSecretUnlockModal, setShowSecretUnlockModal] = useState(false);
   
   // Real WebRTC Call states
-  const [callActive, setCallActive] = useState(null); // { contact, callType, isIncoming, incomingOffer }
-  const [incomingCallAlert, setIncomingCallAlert] = useState(null); // { callerInfo, callType, offer }
+  const [callActive, setCallActive] = useState(null); // { contact, callType, isIncoming, incomingOffer, callerSocketId }
+  const [incomingCallAlert, setIncomingCallAlert] = useState(null); // { callerInfo, callType, offer, callerSocketId }
 
   // Enhanced Media & Feature Modals
   const [activeStoryId, setActiveStoryId] = useState(null);
@@ -128,10 +153,18 @@ function App() {
     }
   }, [myProfile]);
 
-  // Sync state to LocalStorage
+  // Sync state to LocalStorage (Scoped per account so data NEVER crosses over)
   useEffect(() => saveState('my_profile', myProfile), [myProfile]);
-  useEffect(() => saveState('contacts', contacts), [contacts]);
-  useEffect(() => saveState('messages', messages), [messages]);
+  useEffect(() => {
+    if (userKey) {
+      saveState(`contacts_${userKey}`, contacts);
+    }
+  }, [contacts, userKey]);
+  useEffect(() => {
+    if (userKey) {
+      saveState(`messages_${userKey}`, messages);
+    }
+  }, [messages, userKey]);
   useEffect(() => saveState('stories', stories), [stories]);
   useEffect(() => saveState('auto_replies', autoReplies), [autoReplies]);
   useEffect(() => saveState('scheduled', scheduledMessages), [scheduledMessages]);
@@ -620,6 +653,9 @@ function App() {
   // Logout Handler
   const handleLogout = () => {
     setMyProfile(null);
+    setContacts([]);
+    setMessages({});
+    setActiveContactId(null);
     localStorage.removeItem('chatforge_my_profile');
     if (socketService.socket) {
       socketService.socket.disconnect();
@@ -962,6 +998,7 @@ function App() {
           callType={callActive.callType}
           isIncoming={callActive.isIncoming}
           incomingOffer={callActive.incomingOffer}
+          callerSocketId={callActive.callerSocketId}
           onClose={() => setCallActive(null)}
         />
       )}
