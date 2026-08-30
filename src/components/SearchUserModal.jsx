@@ -69,7 +69,7 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
             <Search size={15} className="text-accent search-icon" />
             <input
               type="text"
-              placeholder="Enter exact codename (e.g. narasimha, neo, shadow)..."
+              placeholder="Enter exact codename (e.g. shadow, neo, cipher)..."
               value={searchQuery}
               onChange={(e) => {
                 soundFX.playKeypress();

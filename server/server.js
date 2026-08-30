@@ -28,7 +28,7 @@ const io = new Server(server, {
 });
 
 // Map of all registered users on the network:
-// tag (e.g. '@narasimha') -> { socketId, username, tag, passwordHash, avatar, ip, lastSeen, status, customStatus }
+// tag (e.g. '@operator') -> { socketId, username, tag, passwordHash, avatar, ip, lastSeen, status, customStatus }
 const registeredUsers = new Map();
 
 // Map of Offline Store-and-Forward Mailbox:

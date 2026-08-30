@@ -191,7 +191,7 @@ const LoginScreen = ({ onLogin, serverInfo }) => {
                 <span className="input-prefix">@</span>
                 <input
                   type="text"
-                  placeholder="e.g. narasimha, neo, zero_cool"
+                  placeholder="e.g. shadow_runner, neo, zero_cool"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   onKeyDown={() => soundFX.playKeypress()}
