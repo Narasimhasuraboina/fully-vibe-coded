@@ -303,23 +303,27 @@
   align-items: center;
   justify-content: center;
   gap: 5px;
-  padding: 5px 4px;
+  padding: 6px 6px;
   font-size: 10px;
+  font-weight: 600;
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: 4px;
   color: var(--text-main);
-  transition: all 0.15s;
+  transition: all 0.2s ease;
+  letter-spacing: 0.5px;
 }
 
-.action-pill:hover {
+.action-pill:hover, .action-pill:active {
   border-color: var(--accent);
   color: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+  transform: translateY(-1px);
 }
 
 /* STORIES SECTION */
 .stories-section {
-  padding: 10px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -345,6 +349,12 @@
   gap: 12px;
   overflow-x: auto;
   padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.stories-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 .story-item {
@@ -355,6 +365,11 @@
   cursor: pointer;
   width: 54px;
   flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.story-item:hover, .story-item:active {
+  transform: scale(1.05);
 }
 
 .story-ring {
@@ -364,21 +379,21 @@
   padding: 2px;
   border: 2px solid var(--border);
   position: relative;
-  transition: transform 0.2s;
+  transition: all 0.2s ease;
 }
 
 .story-ring.ring-active {
   border-color: var(--accent);
-  box-shadow: 0 0 6px var(--accent-glow);
+  box-shadow: 0 0 8px var(--accent-glow);
 }
 
 .story-ring.ring-revoked {
   border-color: var(--danger);
-  box-shadow: 0 0 8px rgba(255, 51, 102, 0.5);
+  box-shadow: 0 0 10px rgba(255, 51, 102, 0.6);
 }
 
 .story-ring:hover {
-  transform: scale(1.05);
+  transform: scale(1.08);
 }
 
 .story-avatar {
@@ -506,10 +521,11 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 14px;
+  padding: 11px 14px;
   border-bottom: 1px solid rgba(255,255,255,0.03);
   cursor: pointer;
-  transition: background 0.15s;
+  transition: all 0.18s ease;
+  position: relative;
 }
 
 .chat-item:hover {
@@ -517,7 +533,7 @@
 }
 
 .chat-item.active {
-  background: rgba(0, 255, 102, 0.08);
+  background: linear-gradient(90deg, rgba(0, 255, 102, 0.12) 0%, rgba(0, 255, 102, 0.02) 100%);
   border-left: 3px solid var(--accent);
 }
 
@@ -546,9 +562,18 @@
   border: 1px solid var(--bg-card);
 }
 
-.status-dot.online { background: #00ff66; box-shadow: 0 0 4px #00ff66; }
+.status-dot.online { 
+  background: #00ff66; 
+  box-shadow: 0 0 6px #00ff66; 
+  animation: dotBreathe 2s infinite ease-in-out;
+}
 .status-dot.away { background: #ffaa00; }
 .status-dot.offline { background: #555555; }
+
+@keyframes dotBreathe {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.2); opacity: 0.8; }
+}
 
 .chat-item-content {
   flex: 1;
@@ -638,9 +663,11 @@
   background: var(--badge);
   color: var(--badge-text);
   font-size: 10px;
-  font-weight: bold;
-  padding: 1px 6px;
+  font-weight: 800;
+  padding: 2px 7px;
   border-radius: 10px;
+  box-shadow: 0 0 8px var(--accent-glow);
+  letter-spacing: 0.5px;
 }
 
 .disappearing-badge {
@@ -888,6 +915,18 @@
 .message-row {
   display: flex;
   width: 100%;
+  animation: messageIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes messageIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .user-row {
@@ -899,33 +938,40 @@
 }
 
 .message-bubble {
-  max-width: 65%;
-  min-width: 140px;
-  padding: 8px 12px;
-  border-radius: 6px;
+  max-width: 68%;
+  min-width: 130px;
+  padding: 9px 13px;
+  border-radius: 10px;
   position: relative;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
   border: 1px solid var(--border);
+  transition: all 0.15s ease;
 }
 
 .user-bubble {
-  background: var(--user-bubble);
+  background: linear-gradient(135deg, var(--user-bubble) 0%, rgba(0, 255, 102, 0.06) 100%);
   border-color: var(--border-active);
+  border-radius: 12px 12px 2px 12px;
 }
 
 .contact-bubble {
-  background: var(--contact-bubble);
+  background: linear-gradient(135deg, var(--contact-bubble) 0%, rgba(255, 255, 255, 0.02) 100%);
   border-color: var(--border);
+  border-radius: 12px 12px 12px 2px;
+}
+
+.message-bubble:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
 }
 
 .message-bubble.is-revoked {
   border-color: var(--danger) !important;
-  box-shadow: 0 0 8px rgba(255, 51, 102, 0.3);
+  box-shadow: 0 0 10px rgba(255, 51, 102, 0.35);
 }
 
 .message-bubble.is-burning {
   border-color: #ff5500 !important;
-  box-shadow: 0 0 12px rgba(255, 85, 0, 0.4);
+  box-shadow: 0 0 14px rgba(255, 85, 0, 0.45);
 }
 
 /* BURN SHREDDER & OUTBOX QUEUE BANNERS */
