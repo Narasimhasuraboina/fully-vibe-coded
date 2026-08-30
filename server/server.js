@@ -229,30 +229,8 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const existing = registeredUsers.get(tag);
-
-    // If session reconnect without password for an existing registered operator
-    if ((!password || password.length < 4) && existing) {
-      socket.join(tag);
-      existing.socketId = socket.id;
-      existing.status = 'online';
-      existing.lastSeen = 'online';
-      existing.ip = clientIP;
-      socket.userTag = tag;
-      saveUserDatabase();
-      console.log(`[SESSION RESUMED] Operator ${cleanUser} (${tag}) re-attached socket ${socket.id}.`);
-
-      const safeUser = sanitizeUser(existing);
-      const resp = { success: true, peerInfo: safeUser, localIP };
-      if (typeof callback === 'function') callback(resp);
-      socket.emit('registered', resp);
-      deliverPendingMailboxMessages(tag, socket);
-      socket.broadcast.emit('peer_online_event', { peer: safeUser, timestamp: Date.now() });
-      return;
-    }
-
     if (!password || password.length < 4) {
-      const resp = { success: false, error: 'Password must be at least 4 characters.' };
+      const resp = { success: false, error: 'Cipher passkey must be at least 4 characters.' };
       if (typeof callback === 'function') callback(resp);
       else socket.emit('auth_response', resp);
       return;
@@ -261,24 +239,31 @@ io.on('connection', (socket) => {
     const passwordHash = hashPassword(password);
 
     if (existing) {
-      // If user specifically clicked REGISTER on an existing username
+      // 1. If someone tries to register an already claimed username
       if (isRegisterMode) {
-        const resp = { success: false, error: `Codename "${tag}" is already registered. Please switch to LOGIN or pick another username.` };
+        console.log(`[REGISTRATION BLOCKED] Username "${tag}" is already claimed by an operator.`);
+        const resp = { 
+          success: false, 
+          error: `Codename "${tag}" is permanently claimed. If this is your account, switch to LOGIN with your password.` 
+        };
         if (typeof callback === 'function') callback(resp);
         else socket.emit('auth_response', resp);
         return;
       }
 
-      // Check password match
+      // 2. Strict Password Verification - only the owner can access this username!
       if (existing.passwordHash !== passwordHash) {
-        console.log(`[AUTH REJECTED] Bad password attempt for ${tag} from ${clientIP}`);
-        const resp = { success: false, error: 'INVALID CIPHER PASSKEY! Access denied for this username.' };
+        console.log(`[AUTH REJECTED] Unauthorized login attempt for claimed handle ${tag} from IP: ${clientIP}`);
+        const resp = { 
+          success: false, 
+          error: `SECURITY ALERT: Passkey verification failed! Codename "${tag}" is owned by another operator.` 
+        };
         if (typeof callback === 'function') callback(resp);
         else socket.emit('auth_response', resp);
         return;
       }
 
-      // Password verified! Login successful
+      // Password verified! Grant session to the legitimate owner
       socket.join(tag);
       existing.socketId = socket.id;
       existing.status = 'online';
@@ -289,7 +274,7 @@ io.on('connection', (socket) => {
 
       socket.userTag = tag;
       saveUserDatabase();
-      console.log(`[AUTH SUCCESS] User ${cleanUser} (${tag}) authenticated on socket ${socket.id}.`);
+      console.log(`[AUTH SUCCESS] Verified owner of ${cleanUser} (${tag}) logged in on socket ${socket.id}.`);
 
       const safeUser = sanitizeUser(existing);
       const resp = {
@@ -310,7 +295,7 @@ io.on('connection', (socket) => {
       });
 
     } else {
-      // New User Registration
+      // 3. New User Registration - permanently binds username to this passkey
       socket.join(tag);
       const newUser = {
         socketId: socket.id,
@@ -328,7 +313,7 @@ io.on('connection', (socket) => {
       registeredUsers.set(tag, newUser);
       socket.userTag = tag;
       saveUserDatabase();
-      console.log(`[REGISTER SUCCESS] New Operator ${cleanUser} (${tag}) registered on socket ${socket.id}.`);
+      console.log(`[REGISTER SUCCESS] New Operator ${cleanUser} (${tag}) permanently registered.`);
 
       const safeUser = sanitizeUser(newUser);
       const resp = {
@@ -350,22 +335,18 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Legacy fallback for register_peer
+  // Legacy fallback for register_peer (only for guests, cannot hijack registered names)
   socket.on('register_peer', (peerData) => {
-    const rawUsername = peerData.username || `Operator_${socket.id.substring(0, 4)}`;
+    const rawUsername = peerData.username || `Guest_${socket.id.substring(0, 4)}`;
     const tag = normalizeTag(rawUsername);
     const existing = registeredUsers.get(tag);
 
     if (existing) {
-      socket.join(tag);
-      existing.socketId = socket.id;
-      existing.status = 'online';
-      existing.lastSeen = 'online';
-      socket.userTag = tag;
-      const safe = sanitizeUser(existing);
-      socket.emit('registered', { peerInfo: safe, localIP, port: 3001 });
-      deliverPendingMailboxMessages(tag, socket);
-      socket.broadcast.emit('peer_online_event', { peer: safe, timestamp: Date.now() });
+      socket.emit('auth_response', { 
+        success: false, 
+        error: `Codename "${tag}" is password-protected. Please authenticate with password.` 
+      });
+      return;
     }
   });
 
