@@ -237,6 +237,7 @@ io.on('connection', (socket) => {
     }
 
     const passwordHash = hashPassword(password);
+    const existing = registeredUsers.get(tag);
 
     if (existing) {
       // 1. If someone tries to register an already claimed username
