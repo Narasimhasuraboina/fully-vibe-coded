@@ -57,8 +57,8 @@ function createMessageObject(payload, isUser = true, hideSecondTick = false) {
     timestamp: payload.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     status: hideSecondTick ? 'sent' : 'delivered',
     createdAt: timeNow,
-    burnAfterRead: payload.burnAfterRead ?? false, // View-Once auto-delete default
-    burnCountdown: payload.burnCountdown ?? null,
+    burnAfterRead: payload.burnAfterRead ?? true, // Auto-delete default
+    burnCountdown: payload.burnCountdown !== undefined && payload.burnCountdown !== null ? payload.burnCountdown : 10,
     isOutboxPending: payload.isOutboxPending ?? false,
     isQueuedInServerMailbox: payload.isQueuedInServerMailbox ?? false,
   };
@@ -182,9 +182,11 @@ function App() {
       const thread = prev[contact.id] || [];
       let modified = false;
       const updated = thread.map((m) => {
-        if (m.sender !== 'user' && m.burnCountdown === null) {
+        if (m.burnCountdown === null || m.burnCountdown === undefined) {
           modified = true;
-          socketService.emitMessageViewed(m.id, contact.tag, 10);
+          if (m.sender !== 'user') {
+            socketService.emitMessageViewed(m.id, contact.tag, 10);
+          }
           return { ...m, status: 'read', burnCountdown: 10 };
         }
         return m;
@@ -192,6 +194,27 @@ function App() {
       return modified ? { ...prev, [contact.id]: updated } : prev;
     });
   };
+
+  // Automatically start 10s countdown for any messages in active conversation without a timer
+  useEffect(() => {
+    if (!activeContactId) return;
+    const activeC = contactsRef.current.find((c) => c.id === activeContactId);
+    setMessages((prev) => {
+      const thread = prev[activeContactId] || [];
+      let modified = false;
+      const updated = thread.map((m) => {
+        if (m.burnCountdown === null || m.burnCountdown === undefined) {
+          modified = true;
+          if (m.sender !== 'user' && activeC) {
+            socketService.emitMessageViewed(m.id, activeC.tag, 10);
+          }
+          return { ...m, status: 'read', burnCountdown: 10 };
+        }
+        return m;
+      });
+      return modified ? { ...prev, [activeContactId]: updated } : prev;
+    });
+  }, [activeContactId]);
 
   // Burn / Shred Message Handler (Completely deletes from state & storage)
   const handleBurnShredMessage = useCallback((messageId, targetContactId = activeContactId) => {
