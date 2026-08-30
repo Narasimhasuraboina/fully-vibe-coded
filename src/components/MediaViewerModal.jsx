@@ -24,7 +24,9 @@ const MediaViewerModal = ({ media, onClose, onBurnShred }) => {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const [burnCount, setBurnCount] = useState(media?.burnCountdown !== undefined ? media.burnCountdown : null);
+  const [burnCount, setBurnCount] = useState(
+    media?.burnCountdown !== undefined && media?.burnCountdown !== null ? media.burnCountdown : (media?.burnAfterRead ? 10 : null)
+  );
 
   const videoRef = useRef(null);
 

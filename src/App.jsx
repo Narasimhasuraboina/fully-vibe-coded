@@ -182,10 +182,10 @@ function App() {
       const thread = prev[contact.id] || [];
       let modified = false;
       const updated = thread.map((m) => {
-        if (m.sender !== 'user' && m.burnCountdown === null && m.burnAfterRead) {
+        if (m.sender !== 'user' && m.burnCountdown === null) {
           modified = true;
-          socketService.emitMessageViewed(m.id, contact.tag, 5);
-          return { ...m, burnCountdown: 5 };
+          socketService.emitMessageViewed(m.id, contact.tag, 10);
+          return { ...m, status: 'read', burnCountdown: 10 };
         }
         return m;
       });
@@ -196,12 +196,18 @@ function App() {
   // Burn / Shred Message Handler (Completely deletes from state & storage)
   const handleBurnShredMessage = useCallback((messageId, targetContactId = activeContactId) => {
     setMessages((prev) => {
-      const thread = prev[targetContactId] || [];
-      const updated = thread.filter((m) => m.id !== messageId);
-      return { ...prev, [targetContactId]: updated };
+      const updated = { ...prev };
+      let found = false;
+      Object.keys(updated).forEach((cId) => {
+        if (updated[cId].some((m) => m.id === messageId)) {
+          found = true;
+          updated[cId] = updated[cId].filter((m) => m.id !== messageId);
+        }
+      });
+      return found ? updated : prev;
     });
 
-    const target = contactsRef.current.find(c => c.id === targetContactId);
+    const target = contactsRef.current.find(c => c.id === targetContactId) || contactsRef.current[0];
     if (target) {
       socketService.emitMessageShredded(messageId, target.tag);
     }
@@ -270,7 +276,7 @@ function App() {
       ...message,
       sender: targetContactId,
       status: 'read',
-      burnCountdown: isCurrentlyViewing && message.burnAfterRead ? 5 : null,
+      burnCountdown: isCurrentlyViewing ? 10 : null,
     };
 
     setMessages((prev) => {
@@ -284,9 +290,9 @@ function App() {
       };
     });
 
-    // Auto-view signal if recipient is actively reading this chat
-    if (isCurrentlyViewing && message.burnAfterRead) {
-      socketService.emitMessageViewed(message.id, senderInfo?.tag || cleanSenderTag, 5);
+    // Auto-view signal if recipient is actively reading this chat right now
+    if (isCurrentlyViewing) {
+      socketService.emitMessageViewed(message.id, senderInfo?.tag || cleanSenderTag, 10);
     }
 
     // Push Desktop & HUD Toast Notification
@@ -408,16 +414,21 @@ function App() {
         });
       },
 
-      // Peer viewed message -> start burn countdown on sender side too!
-      onMessageViewedByPeer: ({ messageId, viewerTag, burnDelay }) => {
-        const cleanTag = viewerTag?.toLowerCase()?.trim();
+      // Peer viewed message -> start 10s burn countdown on sender side too!
+      onMessageViewedByPeer: ({ messageId, burnDelay = 10 }) => {
         setMessages((prev) => {
-          const target = contactsRef.current.find((c) => c.tag?.toLowerCase()?.trim() === cleanTag);
-          if (!target || !prev[target.id]) return prev;
-          const updated = prev[target.id].map((m) =>
-            m.id === messageId ? { ...m, status: 'read', burnCountdown: burnDelay || 5 } : m
-          );
-          return { ...prev, [target.id]: updated };
+          const updated = { ...prev };
+          let found = false;
+          Object.keys(updated).forEach((cId) => {
+            updated[cId] = updated[cId].map((m) => {
+              if (m.id === messageId) {
+                found = true;
+                return { ...m, status: 'read', burnCountdown: burnDelay || 10 };
+              }
+              return m;
+            });
+          });
+          return found ? updated : prev;
         });
       },
 

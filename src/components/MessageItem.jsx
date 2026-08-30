@@ -44,10 +44,16 @@ const MessageItem = ({
   const [copied, setCopied] = useState(false);
   const [isViewOnceRevealed, setIsViewOnceRevealed] = useState(!message.burnAfterRead);
   
-  // Burn countdown state
+  const [prevCountdown, setPrevCountdown] = useState(message.burnCountdown);
   const [burnSecondsRemaining, setBurnSecondsRemaining] = useState(
     message.burnCountdown !== undefined ? message.burnCountdown : null
   );
+
+  // Sync state when message.burnCountdown prop changes
+  if (message.burnCountdown !== prevCountdown) {
+    setPrevCountdown(message.burnCountdown);
+    setBurnSecondsRemaining(message.burnCountdown !== undefined ? message.burnCountdown : null);
+  }
 
   const audioElemRef = useRef(null);
 
@@ -55,7 +61,7 @@ const MessageItem = ({
   useEffect(() => {
     if (burnSecondsRemaining !== null && burnSecondsRemaining > 0) {
       const timer = setTimeout(() => {
-        setBurnSecondsRemaining((prev) => prev - 1);
+        setBurnSecondsRemaining((prev) => (prev > 0 ? prev - 1 : 0));
       }, 1000);
       return () => clearTimeout(timer);
     } else if (burnSecondsRemaining === 0) {
@@ -164,12 +170,12 @@ const MessageItem = ({
           </div>
         )}
 
-        {/* Burn-After-Read (View-Once) Shredder Header */}
+        {/* Burn-After-Read / Disappearing Message Shredder Header */}
         {burnSecondsRemaining !== null && (
           <div className="burn-shredder-header">
             <Flame size={14} className="flame-icon animate-pulse text-danger" />
             <span className="burn-text">
-              VIEW-ONCE PROTOCOL: AUTO-SHREDDING IN {burnSecondsRemaining}s
+              EPHEMERAL PROTOCOL: DISAPPEARING IN {burnSecondsRemaining}s
             </span>
           </div>
         )}
