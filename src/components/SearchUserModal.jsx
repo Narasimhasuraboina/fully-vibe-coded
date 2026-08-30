@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, UserPlus, X, MessageSquare, Shield, Lock, Radio } from 'lucide-react';
+import { Search, UserPlus, X, MessageSquare, Shield, Lock, Radio, Send, Zap } from 'lucide-react';
 import { soundFX } from '../services/audioService';
 import { socketService } from '../services/socketService';
 
@@ -9,29 +9,56 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
   const [isSearching, setIsSearching] = useState(false);
 
   useEffect(() => {
-    const query = searchQuery.trim().toLowerCase().replace(/^@/, '');
-    if (!query) return;
+    const cleanQ = searchQuery.trim().toLowerCase().replace(/^@/, '');
+    if (!cleanQ) return;
 
     const debounceTimer = setTimeout(() => {
       setIsSearching(true);
-      socketService.searchUsers(query, (results) => {
+      socketService.searchUsers(cleanQ, (results) => {
+        // Also query known local contacts
+        const localMatches = (existingContacts || []).filter(c =>
+          (c.name && c.name.toLowerCase().includes(cleanQ)) ||
+          (c.tag && c.tag.toLowerCase().includes(cleanQ))
+        ).map(c => ({
+          username: c.name,
+          tag: c.tag,
+          avatar: c.avatar,
+          status: c.status || 'offline',
+          lastSeen: c.lastSeen || 'offline',
+          customStatus: c.customStatus || 'Known Contact',
+        }));
+
+        // Combine server results + local contacts (deduplicate by tag)
+        const combinedMap = new Map();
+        (results || []).forEach(u => {
+          if (u && u.tag) combinedMap.set(u.tag.toLowerCase(), u);
+        });
+        localMatches.forEach(u => {
+          if (u && u.tag && !combinedMap.has(u.tag.toLowerCase())) {
+            combinedMap.set(u.tag.toLowerCase(), u);
+          }
+        });
+
         // Filter out self
-        const filtered = (results || []).filter(u => u.tag !== currentProfile?.tag);
+        const myTag = currentProfile?.tag?.toLowerCase();
+        const filtered = Array.from(combinedMap.values()).filter(u => u.tag?.toLowerCase() !== myTag);
+
         setSearchResults(filtered);
         setIsSearching(false);
       });
-    }, 150);
+    }, 100);
 
     return () => clearTimeout(debounceTimer);
-  }, [searchQuery, currentProfile?.tag]);
+  }, [searchQuery, currentProfile?.tag, existingContacts]);
 
   const handleStartChat = (user) => {
     soundFX.playSent();
+    const cleanTag = user.tag?.startsWith('@') ? user.tag : `@${user.tag || user.username.toLowerCase()}`;
     onSelectAndAddContact({
-      id: user.id || `peer_${user.username.toLowerCase()}`,
+      id: user.id || `peer_${user.username.toLowerCase().replace(/\s+/g, '_')}`,
       name: user.username,
-      tag: user.tag,
-      avatar: user.avatar,
+      tag: cleanTag,
+      avatar: user.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
       status: user.status || 'offline',
       lastSeen: user.lastSeen || 'offline',
       ip: user.ip || '192.168.1.x',
@@ -40,11 +67,26 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
       pinned: false,
       isSecret: false,
       disappearingTimer: 0,
-      customStatus: user.customStatus || 'Registered Node',
+      customStatus: user.customStatus || (user.status === 'online' ? 'Active on mesh' : 'Registered Offline Node'),
       bio: 'Discovered operator on private mesh network.',
     });
     onClose();
   };
+
+  const handleDirectStart = (rawName) => {
+    const cleanUser = rawName.trim().replace(/^@/, '');
+    if (!cleanUser) return;
+    handleStartChat({
+      username: cleanUser,
+      tag: `@${cleanUser.toLowerCase()}`,
+      status: 'offline',
+      lastSeen: 'offline',
+      customStatus: 'Offline Node (Mailbox Ready)',
+      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+    });
+  };
+
+  const cleanQuery = searchQuery.trim().replace(/^@/, '');
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -59,7 +101,7 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
 
         <div className="modal-body">
           <p className="modal-description">
-            To text someone, enter their exact <strong>@username</strong>. Public user lists are hidden for zero-knowledge privacy.
+            Enter an operator's <strong>@username</strong> to open an encrypted session. Works seamlessly for both <strong>online</strong> and <strong>offline</strong> registered peers.
           </p>
 
           <div className="search-input-box">
@@ -72,10 +114,6 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
                 soundFX.playKeypress();
                 const val = e.target.value;
                 setSearchQuery(val);
-                if (!val.trim()) {
-                  setSearchResults([]);
-                  setIsSearching(false);
-                }
               }}
               autoFocus
               className="cyber-input search-input-field"
@@ -98,20 +136,29 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
             {!searchQuery.trim() ? (
               <div className="empty-search-state">
                 <Lock size={34} className="text-accent pulse-icon" />
-                <p>PRIVATE NETWORK // ZERO DIRECTORY LEAKAGE</p>
+                <p>ZERO DIRECTORY LEAKAGE // PRIVATE LOOKUP</p>
                 <span>Type the recipient's @username above to find them (whether they are online or offline).</span>
               </div>
             ) : isSearching ? (
               <div className="empty-search-state">
                 <Radio size={32} className="text-accent pulse-icon" />
-                <p>SEARCHING SECURE MESH...</p>
-                <span>Scanning registered nodes for @{searchQuery.replace(/^@/, '')}...</span>
+                <p>SEARCHING REGISTERED NODES...</p>
+                <span>Scanning network directory for @{cleanQuery}...</span>
               </div>
             ) : searchResults.length === 0 ? (
               <div className="empty-search-state">
-                <Shield size={32} className="text-muted" />
-                <p>NO OPERATOR FOUND FOR "@{searchQuery.replace(/^@/, '')}"</p>
-                <span>Make sure the person has registered with this exact username on Chatforge.</span>
+                <Shield size={32} className="text-accent" />
+                <p>START CHAT WITH @{cleanQuery}</p>
+                <span>Recipient is currently offline. Your encrypted messages will be held in the Server Mailbox and delivered the moment they log in.</span>
+                
+                <button
+                  className="cyber-btn btn-primary btn-direct-start"
+                  onClick={() => handleDirectStart(cleanQuery)}
+                  style={{ marginTop: '12px', width: '100%' }}
+                >
+                  <Send size={14} />
+                  <span>START CHAT WITH @{cleanQuery.toUpperCase()} (OFFLINE MAILBOX READY)</span>
+                </button>
               </div>
             ) : (
               <div className="results-list">
@@ -137,7 +184,7 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
                             {isOnline ? '● ONLINE' : '○ OFFLINE (MAILBOX READY)'}
                           </span>
                         </div>
-                        <span className="user-bio">{user.customStatus || (isOnline ? 'Active on mesh' : `Last active: ${user.lastSeen || 'offline'}`)}</span>
+                        <span className="user-bio">{user.customStatus || (isOnline ? 'Active on mesh' : `Last seen: ${user.lastSeen || 'offline'}`)}</span>
                       </div>
 
                       <button
@@ -159,6 +206,20 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
                     </div>
                   );
                 })}
+
+                {/* Always offer direct start button for query if not already in list */}
+                {!searchResults.some(u => u.username.toLowerCase() === cleanQuery.toLowerCase() || u.tag.toLowerCase() === `@${cleanQuery.toLowerCase()}`) && (
+                  <div className="direct-fallback-banner" style={{ marginTop: '10px', padding: '8px', border: '1px dashed var(--border)', borderRadius: '4px', textAlign: 'center' }}>
+                    <button
+                      className="cyber-btn btn-secondary btn-sm"
+                      onClick={() => handleDirectStart(cleanQuery)}
+                      style={{ width: '100%' }}
+                    >
+                      <Zap size={12} className="text-accent" />
+                      <span>START CHAT WITH UNLISTED NODE @{cleanQuery}</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>

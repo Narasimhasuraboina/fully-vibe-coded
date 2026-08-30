@@ -152,6 +152,22 @@ app.get('/api/info', (req, res) => {
   });
 });
 
+// REST API for operator lookup (supports both online & offline registered users)
+app.get('/api/search', (req, res) => {
+  const rawQ = req.query.q || '';
+  const q = rawQ.toLowerCase().trim().replace(/^@/, '');
+  if (!q || q.length < 1) {
+    return res.json([]);
+  }
+
+  const allUsers = getSanitizedDirectory();
+  const matches = allUsers.filter(u => 
+    (u.username && u.username.toLowerCase().includes(q)) || 
+    (u.tag && u.tag.toLowerCase().includes(q))
+  );
+  return res.json(matches);
+});
+
 // Helper to normalize any username / tag to standard @lowercase
 function normalizeTag(input) {
   if (!input || typeof input !== 'string') return '';
@@ -546,6 +562,7 @@ io.on('connection', (socket) => {
           user.status = 'offline';
           user.lastSeen = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
           user.socketId = null;
+          saveUserDatabase();
 
           console.log(`[USER OFFLINE] ${user.username} (${user.tag}) went offline`);
 

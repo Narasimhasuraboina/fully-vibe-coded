@@ -233,30 +233,48 @@ class RealtimeSocketService {
     return true;
   }
 
-  // Search registered users by username
-  searchUsers(query, callback) {
-    if (!query || !query.trim()) {
+  // Search registered users by username (dual socket + REST API for maximum reliability)
+  async searchUsers(query, callback) {
+    const cleanQ = (query || '').trim().replace(/^@/, '');
+    if (!cleanQ) {
       if (typeof callback === 'function') callback([]);
       return;
     }
 
+    let completed = false;
+    const safeCallback = (results) => {
+      if (completed) return;
+      completed = true;
+      if (typeof callback === 'function') callback(results || []);
+    };
+
+    // 1. Try Socket Search
     if (this.socket && (this.isConnected || this.socket.connected)) {
-      this.socket.emit('search_users', { query: query.trim() }, (results) => {
-        if (typeof callback === 'function') {
-          callback(results || []);
+      this.socket.emit('search_users', { query: cleanQ }, (results) => {
+        if (Array.isArray(results)) {
+          safeCallback(results);
         }
       });
-    } else if (this.socket) {
-      this.socket.once('connect', () => {
-        this.socket.emit('search_users', { query: query.trim() }, (results) => {
-          if (typeof callback === 'function') {
-            callback(results || []);
-          }
-        });
-      });
-    } else {
-      if (typeof callback === 'function') callback([]);
     }
+
+    // 2. Concurrently try HTTP REST Search
+    try {
+      const serverUrl = this.getServerUrl();
+      const res = await fetch(`${serverUrl}/api/search?q=${encodeURIComponent(cleanQ)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          safeCallback(data);
+        }
+      }
+    } catch {
+      // Ignore network errors in REST fallback
+    }
+
+    // 3. Fallback timeout if neither responded
+    setTimeout(() => {
+      safeCallback([]);
+    }, 1200);
   }
 
   // Notify sender that message has been viewed (triggering 1-view burn countdown)
