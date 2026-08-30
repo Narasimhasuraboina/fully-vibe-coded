@@ -57,8 +57,8 @@ function createMessageObject(payload, isUser = true, hideSecondTick = false) {
     timestamp: payload.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     status: hideSecondTick ? 'sent' : 'delivered',
     createdAt: timeNow,
-    burnAfterRead: payload.burnAfterRead ?? true, // Auto-delete default
-    burnCountdown: payload.burnCountdown !== undefined && payload.burnCountdown !== null ? payload.burnCountdown : 10,
+    burnAfterRead: payload.burnAfterRead ?? true, // Auto-delete on read
+    burnCountdown: payload.burnCountdown ?? null,
     isOutboxPending: payload.isOutboxPending ?? false,
     isQueuedInServerMailbox: payload.isQueuedInServerMailbox ?? false,
   };
@@ -182,11 +182,9 @@ function App() {
       const thread = prev[contact.id] || [];
       let modified = false;
       const updated = thread.map((m) => {
-        if (m.burnCountdown === null || m.burnCountdown === undefined) {
+        if (m.sender !== 'user' && (m.burnCountdown === null || m.burnCountdown === undefined)) {
           modified = true;
-          if (m.sender !== 'user') {
-            socketService.emitMessageViewed(m.id, contact.tag, 10);
-          }
+          socketService.emitMessageViewed(m.id, contact.tag, 10);
           return { ...m, status: 'read', burnCountdown: 10 };
         }
         return m;
@@ -194,27 +192,6 @@ function App() {
       return modified ? { ...prev, [contact.id]: updated } : prev;
     });
   };
-
-  // Automatically start 10s countdown for any messages in active conversation without a timer
-  useEffect(() => {
-    if (!activeContactId) return;
-    const activeC = contactsRef.current.find((c) => c.id === activeContactId);
-    setMessages((prev) => {
-      const thread = prev[activeContactId] || [];
-      let modified = false;
-      const updated = thread.map((m) => {
-        if (m.burnCountdown === null || m.burnCountdown === undefined) {
-          modified = true;
-          if (m.sender !== 'user' && activeC) {
-            socketService.emitMessageViewed(m.id, activeC.tag, 10);
-          }
-          return { ...m, status: 'read', burnCountdown: 10 };
-        }
-        return m;
-      });
-      return modified ? { ...prev, [activeContactId]: updated } : prev;
-    });
-  }, [activeContactId]);
 
   // Burn / Shred Message Handler (Completely deletes from state & storage)
   const handleBurnShredMessage = useCallback((messageId, targetContactId = activeContactId) => {
@@ -254,6 +231,12 @@ function App() {
     );
     let targetContactId = senderContact?.id;
 
+    const isCurrentlyViewing = Boolean(
+      activeContactRef.current &&
+      (activeContactRef.current === targetContactId ||
+       (senderContact && (activeContactRef.current === senderContact.id || (senderContact.tag && activeContactRef.current.toLowerCase() === senderContact.tag.toLowerCase()))))
+    );
+
     if (!senderContact) {
       targetContactId = `peer_${cleanSenderUser || Date.now()}`;
       senderContact = {
@@ -265,7 +248,7 @@ function App() {
         lastSeen: 'online',
         ip: senderInfo?.ip || '192.168.1.x',
         pgp: 'PGP-4096-LIVE-PEER',
-        unreadCount: 1,
+        unreadCount: isCurrentlyViewing ? 0 : 1,
         pinned: false,
         isSecret: false,
         disappearingTimer: 0,
@@ -278,7 +261,6 @@ function App() {
       }
     } else {
       // Mark contact online and increment unread count if not currently looking at this active chat
-      const isCurrentlyViewing = activeContactRef.current === senderContact.id;
       setContacts((prev) =>
         prev.map((c) =>
           c.id === senderContact.id
@@ -294,11 +276,10 @@ function App() {
       );
     }
 
-    const isCurrentlyViewing = activeContactRef.current === targetContactId;
     const incomingMsg = {
       ...message,
       sender: targetContactId,
-      status: 'read',
+      status: isCurrentlyViewing ? 'read' : 'delivered',
       burnCountdown: isCurrentlyViewing ? 10 : null,
     };
 
