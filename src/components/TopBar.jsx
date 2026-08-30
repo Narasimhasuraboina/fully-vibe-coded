@@ -1,3 +1,4 @@
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Shield, 
   Eye, 
@@ -12,8 +13,7 @@ import {
   Terminal,
   Radio,
   LogOut,
-  SlidersHorizontal,
-  RefreshCw
+  SlidersHorizontal
 } from 'lucide-react';
 import { THEMES } from '../themes';
 import { soundFX } from '../services/audioService';
@@ -29,22 +29,14 @@ const TopBar = ({
   myProfile,
   onOpenProfile,
   onLogout,
-  onRefresh,
   isRealtimeConnected
 }) => {
   const [time, setTime] = useState('');
   const [cpuUsage, setCpuUsage] = useState(28);
   const [latency, setLatency] = useState(14);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [themeDropdownOpen, setThemeDropdownOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const dropdownRef = useRef(null);
-
-  const handleRefreshClick = () => {
-    setIsRefreshing(true);
-    if (onRefresh) onRefresh();
-    setTimeout(() => setIsRefreshing(false), 1000);
-  };
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -169,15 +161,6 @@ const TopBar = ({
           title="Toggle Cyber Sound FX"
         >
           {gbSettings.soundEffects ? <Volume2 size={15} /> : <VolumeX size={15} />}
-        </button>
-
-        {/* Instant Mobile & Desktop Sync / Refresh Button */}
-        <button 
-          className={`cyber-btn btn-icon ${isRefreshing ? 'active text-accent' : ''}`}
-          onClick={handleRefreshClick}
-          title="Instant Sync & Reload Node (Tap to Sync / Long Press or Double Click to Reload Page)"
-        >
-          <RefreshCw size={15} className={isRefreshing ? 'animate-spin' : ''} />
         </button>
 
         {/* CRT Scanline Toggle */}

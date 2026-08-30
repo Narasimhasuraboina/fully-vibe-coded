@@ -167,14 +167,6 @@ class RealtimeSocketService {
       if (callbacks.onReceiveMessage) callbacks.onReceiveMessage(payload);
     });
 
-    this.socket.on('sync_sent_message', (data) => {
-      if (callbacks.onSyncSentMessage) callbacks.onSyncSentMessage(data);
-    });
-
-    this.socket.on('call_answered_elsewhere', () => {
-      if (callbacks.onCallAnsweredElsewhere) callbacks.onCallAnsweredElsewhere();
-    });
-
     this.socket.on('message_delivered_ack', (ack) => {
       if (callbacks.onMessageDelivered) callbacks.onMessageDelivered(ack);
     });
@@ -307,27 +299,27 @@ class RealtimeSocketService {
   }
 
   // WebRTC Calling
-  emitCallOffer(targetTag, callType, offer, callerSocketId = null) {
+  emitCallOffer(targetTag, callType, offer) {
     if (this.socket && this.isConnected) {
-      this.socket.emit('call_offer', { targetTag, callType, offer, callerSocketId: callerSocketId || this.socket.id });
+      this.socket.emit('call_offer', { targetTag, callType, offer });
     }
   }
 
-  emitCallAnswer(callerTag, answer, callerSocketId = null) {
+  emitCallAnswer(callerTag, answer) {
     if (this.socket && this.isConnected) {
-      this.socket.emit('call_answer', { callerTag, answer, callerSocketId });
+      this.socket.emit('call_answer', { callerTag, answer });
     }
   }
 
-  emitIceCandidate(targetTag, candidate, targetSocketId = null) {
+  emitIceCandidate(targetTag, candidate) {
     if (this.socket && this.isConnected) {
-      this.socket.emit('ice_candidate', { targetTag, candidate, targetSocketId });
+      this.socket.emit('ice_candidate', { targetTag, candidate });
     }
   }
 
-  emitCallReject(callerTag, reason = 'CALL_DECLINED', callerSocketId = null) {
+  emitCallReject(callerTag, reason = 'CALL_DECLINED') {
     if (this.socket && this.isConnected) {
-      this.socket.emit('call_reject', { callerTag, reason, callerSocketId });
+      this.socket.emit('call_reject', { callerTag, reason });
     }
   }
 

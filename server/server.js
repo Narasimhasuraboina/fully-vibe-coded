@@ -35,10 +35,6 @@ const registeredUsers = new Map();
 // recipientTag -> [ { message, senderInfo, queuedAt } ]
 const offlineMailbox = new Map();
 
-// Map of in-flight WebRTC ICE candidate queues:
-// targetTag -> [ { candidate, fromTag, fromSocketId } ]
-const callCandidateBuffer = new Map();
-
 // Helper to hash password with quantum salt
 function hashPassword(password, salt = 'chatforge_quantum_salt_v1') {
   return crypto.createHash('sha256').update(password + salt).digest('hex');
@@ -233,42 +229,56 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const existing = registeredUsers.get(tag);
+
+    // If session reconnect without password for an existing registered operator
+    if ((!password || password.length < 4) && existing) {
+      socket.join(tag);
+      existing.socketId = socket.id;
+      existing.status = 'online';
+      existing.lastSeen = 'online';
+      existing.ip = clientIP;
+      socket.userTag = tag;
+      saveUserDatabase();
+      console.log(`[SESSION RESUMED] Operator ${cleanUser} (${tag}) re-attached socket ${socket.id}.`);
+
+      const safeUser = sanitizeUser(existing);
+      const resp = { success: true, peerInfo: safeUser, localIP };
+      if (typeof callback === 'function') callback(resp);
+      socket.emit('registered', resp);
+      deliverPendingMailboxMessages(tag, socket);
+      socket.broadcast.emit('peer_online_event', { peer: safeUser, timestamp: Date.now() });
+      return;
+    }
+
     if (!password || password.length < 4) {
-      const resp = { success: false, error: 'Cipher passkey must be at least 4 characters.' };
+      const resp = { success: false, error: 'Password must be at least 4 characters.' };
       if (typeof callback === 'function') callback(resp);
       else socket.emit('auth_response', resp);
       return;
     }
 
     const passwordHash = hashPassword(password);
-    const existing = registeredUsers.get(tag);
 
     if (existing) {
-      // 1. If someone tries to register an already claimed username
+      // If user specifically clicked REGISTER on an existing username
       if (isRegisterMode) {
-        console.log(`[REGISTRATION BLOCKED] Username "${tag}" is already claimed by an operator.`);
-        const resp = { 
-          success: false, 
-          error: `Codename "${tag}" is permanently claimed. If this is your account, switch to LOGIN with your password.` 
-        };
+        const resp = { success: false, error: `Codename "${tag}" is already registered. Please switch to LOGIN or pick another username.` };
         if (typeof callback === 'function') callback(resp);
         else socket.emit('auth_response', resp);
         return;
       }
 
-      // 2. Strict Password Verification - only the owner can access this username!
+      // Check password match
       if (existing.passwordHash !== passwordHash) {
-        console.log(`[AUTH REJECTED] Unauthorized login attempt for claimed handle ${tag} from IP: ${clientIP}`);
-        const resp = { 
-          success: false, 
-          error: `SECURITY ALERT: Passkey verification failed! Codename "${tag}" is owned by another operator.` 
-        };
+        console.log(`[AUTH REJECTED] Bad password attempt for ${tag} from ${clientIP}`);
+        const resp = { success: false, error: 'INVALID CIPHER PASSKEY! Access denied for this username.' };
         if (typeof callback === 'function') callback(resp);
         else socket.emit('auth_response', resp);
         return;
       }
 
-      // Password verified! Grant session to the legitimate owner
+      // Password verified! Login successful
       socket.join(tag);
       existing.socketId = socket.id;
       existing.status = 'online';
@@ -279,7 +289,7 @@ io.on('connection', (socket) => {
 
       socket.userTag = tag;
       saveUserDatabase();
-      console.log(`[AUTH SUCCESS] Verified owner of ${cleanUser} (${tag}) logged in on socket ${socket.id}.`);
+      console.log(`[AUTH SUCCESS] User ${cleanUser} (${tag}) authenticated on socket ${socket.id}.`);
 
       const safeUser = sanitizeUser(existing);
       const resp = {
@@ -300,7 +310,7 @@ io.on('connection', (socket) => {
       });
 
     } else {
-      // 3. New User Registration - permanently binds username to this passkey
+      // New User Registration
       socket.join(tag);
       const newUser = {
         socketId: socket.id,
@@ -318,7 +328,7 @@ io.on('connection', (socket) => {
       registeredUsers.set(tag, newUser);
       socket.userTag = tag;
       saveUserDatabase();
-      console.log(`[REGISTER SUCCESS] New Operator ${cleanUser} (${tag}) permanently registered.`);
+      console.log(`[REGISTER SUCCESS] New Operator ${cleanUser} (${tag}) registered on socket ${socket.id}.`);
 
       const safeUser = sanitizeUser(newUser);
       const resp = {
@@ -340,18 +350,22 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Legacy fallback for register_peer (only for guests, cannot hijack registered names)
+  // Legacy fallback for register_peer
   socket.on('register_peer', (peerData) => {
-    const rawUsername = peerData.username || `Guest_${socket.id.substring(0, 4)}`;
+    const rawUsername = peerData.username || `Operator_${socket.id.substring(0, 4)}`;
     const tag = normalizeTag(rawUsername);
     const existing = registeredUsers.get(tag);
 
     if (existing) {
-      socket.emit('auth_response', { 
-        success: false, 
-        error: `Codename "${tag}" is password-protected. Please authenticate with password.` 
-      });
-      return;
+      socket.join(tag);
+      existing.socketId = socket.id;
+      existing.status = 'online';
+      existing.lastSeen = 'online';
+      socket.userTag = tag;
+      const safe = sanitizeUser(existing);
+      socket.emit('registered', { peerInfo: safe, localIP, port: 3001 });
+      deliverPendingMailboxMessages(tag, socket);
+      socket.broadcast.emit('peer_online_event', { peer: safe, timestamp: Date.now() });
     }
   });
 
@@ -422,12 +436,6 @@ io.on('connection', (socket) => {
         senderInfo: sanitizeUser(sender),
       });
 
-      // SYNC SENT MESSAGE TO SENDER'S OTHER LOGGED-IN DEVICES!
-      socket.to(senderTag).emit('sync_sent_message', {
-        recipientTag: cleanRecipientTag,
-        message,
-      });
-
       // Confirm delivered to sender
       socket.emit('message_delivered_ack', {
         messageId: message?.id,
@@ -435,7 +443,7 @@ io.on('connection', (socket) => {
         status: 'delivered',
       });
 
-      console.log(`[DELIVERY LIVE] Message ${message?.id} from ${sender.tag} -> ${cleanRecipientTag} delivered live (and synced to sender's other devices).`);
+      console.log(`[DELIVERY LIVE] Message ${message?.id} from ${sender.tag} -> ${cleanRecipientTag} delivered live.`);
     } else {
       // Recipient is OFFLINE -> Deposit in Zero-Knowledge Store-and-Forward Server Mailbox!
       const currentQueue = offlineMailbox.get(cleanRecipientTag) || [];
@@ -452,12 +460,6 @@ io.on('connection', (socket) => {
 
       console.log(`[MAILBOX] Message ${message?.id} from ${sender.tag} stored in encrypted mailbox for ${cleanRecipientTag} (Queue: ${filtered.length})`);
 
-      // SYNC SENT MESSAGE TO SENDER'S OTHER LOGGED-IN DEVICES EVEN IF RECIPIENT IS OFFLINE!
-      socket.to(senderTag).emit('sync_sent_message', {
-        recipientTag: cleanRecipientTag,
-        message,
-      });
-
       // Acknowledge to sender that server mailbox accepted the packet
       socket.emit('message_queued_server_ack', {
         messageId: message?.id,
@@ -473,7 +475,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 4. Burn-After-Read (View-Once) Protocol (Synced across all active peer devices)
+  // 4. Burn-After-Read (View-Once) Protocol
   socket.on('message_viewed', ({ messageId, senderTag, burnDelay = 5 }) => {
     const cleanSenderTag = normalizeTag(senderTag);
     const viewer = socket.userTag ? registeredUsers.get(normalizeTag(socket.userTag)) : null;
@@ -483,22 +485,12 @@ io.on('connection', (socket) => {
       viewerTag: viewer?.tag,
       burnDelay,
     });
-    if (socket.userTag) {
-      socket.to(normalizeTag(socket.userTag)).emit('message_viewed_by_peer', {
-        messageId,
-        viewerTag: viewer?.tag,
-        burnDelay,
-      });
-    }
   });
 
   // 5. Message Shred Confirmation
   socket.on('message_shredded', ({ messageId, targetTag }) => {
     const cleanTargetTag = normalizeTag(targetTag);
     io.to(cleanTargetTag).emit('message_shredded_ack', { messageId });
-    if (socket.userTag) {
-      socket.to(normalizeTag(socket.userTag)).emit('message_shredded_ack', { messageId });
-    }
   });
 
   // 6. Real-Time Typing Indicator
@@ -513,107 +505,48 @@ io.on('connection', (socket) => {
     });
   });
 
-  // 7. WebRTC Audio / Video Call Signaling (Multi-device targeted with ICE Candidate Buffer)
+  // 7. WebRTC Audio / Video Call Signaling
   socket.on('call_offer', (data) => {
     const sender = socket.userTag ? registeredUsers.get(normalizeTag(socket.userTag)) : null;
     const cleanTargetTag = normalizeTag(data.targetTag);
     const targetRoom = io.sockets.adapter.rooms.get(cleanTargetTag);
 
-    // Clear stale candidate buffer for target
-    callCandidateBuffer.delete(cleanTargetTag);
-
     if (targetRoom && targetRoom.size > 0) {
       io.to(cleanTargetTag).emit('incoming_call_signal', {
-        callerInfo: sanitizeUser(sender || { username: 'Operator', tag: socket.userTag || '@operator' }),
-        callerSocketId: socket.id,
+        callerInfo: sanitizeUser(sender),
         callType: data.callType,
         offer: data.offer,
       });
     } else {
-      socket.emit('call_rejected_signal', { reason: 'PEER_CURRENTLY_OFFLINE' });
+      socket.emit('call_rejected_signal', { reason: 'PEER_UNREACHABLE_OR_OFFLINE' });
     }
   });
 
   socket.on('call_answer', (data) => {
     const cleanCallerTag = normalizeTag(data.callerTag);
-    const answeringSocketId = socket.id;
-
-    if (data.callerSocketId) {
-      io.to(data.callerSocketId).emit('call_answered_signal', {
-        answer: data.answer,
-        answerSocketId: answeringSocketId,
-      });
-    } else {
-      io.to(cleanCallerTag).emit('call_answered_signal', {
-        answer: data.answer,
-        answerSocketId: answeringSocketId,
-      });
-    }
-
-    // Flush any early buffered ICE candidates to this answering receiver socket!
-    if (socket.userTag) {
-      const userTag = normalizeTag(socket.userTag);
-      const buffered = callCandidateBuffer.get(userTag) || [];
-      if (buffered.length > 0) {
-        console.log(`[WEBRTC] Flushing ${buffered.length} buffered ICE candidates to answering socket ${answeringSocketId}`);
-        buffered.forEach((candData) => {
-          socket.emit('ice_candidate_signal', candData);
-        });
-        callCandidateBuffer.delete(userTag);
-      }
-    }
-
-    // Cancel call alert on callee's other devices
-    if (socket.userTag) {
-      socket.to(normalizeTag(socket.userTag)).emit('call_answered_elsewhere');
-    }
+    io.to(cleanCallerTag).emit('call_answered_signal', {
+      answer: data.answer,
+    });
   });
 
   socket.on('ice_candidate', (data) => {
     const cleanTargetTag = normalizeTag(data.targetTag);
-    const candPayload = {
+    io.to(cleanTargetTag).emit('ice_candidate_signal', {
       candidate: data.candidate,
       fromTag: socket.userTag,
-      fromSocketId: socket.id,
-    };
-
-    // Buffer candidate in case callee has not mounted CallModal yet
-    const currentBuf = callCandidateBuffer.get(cleanTargetTag) || [];
-    currentBuf.push(candPayload);
-    callCandidateBuffer.set(cleanTargetTag, currentBuf);
-
-    if (data.targetSocketId) {
-      io.to(data.targetSocketId).emit('ice_candidate_signal', candPayload);
-    } else {
-      io.to(cleanTargetTag).emit('ice_candidate_signal', candPayload);
-    }
+    });
   });
 
   socket.on('call_reject', (data) => {
     const cleanCallerTag = normalizeTag(data.callerTag);
-    callCandidateBuffer.delete(cleanCallerTag);
-    if (socket.userTag) callCandidateBuffer.delete(normalizeTag(socket.userTag));
-
-    if (data.callerSocketId) {
-      io.to(data.callerSocketId).emit('call_rejected_signal', {
-        reason: data.reason || 'CALL_DECLINED_BY_PEER',
-      });
-    } else {
-      io.to(cleanCallerTag).emit('call_rejected_signal', {
-        reason: data.reason || 'CALL_DECLINED_BY_PEER',
-      });
-    }
+    io.to(cleanCallerTag).emit('call_rejected_signal', {
+      reason: data.reason || 'CALL_DECLINED_BY_PEER',
+    });
   });
 
   socket.on('call_end', (data) => {
     const cleanTargetTag = normalizeTag(data.targetTag);
-    callCandidateBuffer.delete(cleanTargetTag);
-    if (socket.userTag) callCandidateBuffer.delete(normalizeTag(socket.userTag));
-
     io.to(cleanTargetTag).emit('call_ended_signal');
-    if (socket.userTag) {
-      socket.to(normalizeTag(socket.userTag)).emit('call_ended_signal');
-    }
   });
 
   // 8. Disconnect Handler
