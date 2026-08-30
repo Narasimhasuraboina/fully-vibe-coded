@@ -120,6 +120,14 @@ class RealtimeSocketService {
       if (callbacks.onMessageDelivered) callbacks.onMessageDelivered(ack);
     });
 
+    this.socket.on('message_queued_server_ack', (data) => {
+      if (callbacks.onMessageQueuedInServerMailbox) callbacks.onMessageQueuedInServerMailbox(data);
+    });
+
+    this.socket.on('mailbox_delivered_summary', (data) => {
+      if (callbacks.onMailboxDeliveredSummary) callbacks.onMailboxDeliveredSummary(data);
+    });
+
     this.socket.on('peer_offline_ack', (ack) => {
       if (callbacks.onPeerOfflineAck) callbacks.onPeerOfflineAck(ack);
     });

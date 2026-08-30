@@ -18,7 +18,8 @@ import {
   Radio, 
   Maximize2, 
   CornerUpRight, 
-  Lock 
+  Lock, 
+  Cloud 
 } from 'lucide-react';
 import { soundFX } from '../services/audioService';
 
@@ -112,6 +113,13 @@ const MessageItem = ({
 
   const getStatusIcon = () => {
     if (!isUser) return null;
+    if (message.isQueuedInServerMailbox || message.status === 'queued_server') {
+      return (
+        <span className="server-mailbox-tag" title="Encrypted message is deposited in Relay Server Offline Mailbox. It will deliver automatically when peer logs in even if your browser is closed.">
+          <Cloud size={13} className="text-accent pulse-icon" />
+        </span>
+      );
+    }
     if (message.isOutboxPending) {
       return (
         <span className="outbox-pending-tag" title="Peer is currently offline. Stored in sender local outbox. Will auto-send when peer comes online.">
@@ -140,8 +148,16 @@ const MessageItem = ({
     <div className={`message-row ${isUser ? 'user-row' : 'contact-row'}`}>
       <div className={`message-bubble ${isUser ? 'user-bubble' : 'contact-bubble'} ${message.isDeletedBySender ? 'is-revoked' : ''} ${burnSecondsRemaining !== null ? 'is-burning' : ''}`}>
         
+        {/* Server Offline Mailbox Banner */}
+        {(message.isQueuedInServerMailbox || message.status === 'queued_server') && isUser && (
+          <div className="outbox-queue-banner server-mailbox-banner">
+            <Cloud size={12} className="pulse-icon text-accent" />
+            <span>ENCRYPTED SERVER MAILBOX: WILL DELIVER ON PEER LOGIN</span>
+          </div>
+        )}
+
         {/* Offline Outbox Banner */}
-        {message.isOutboxPending && isUser && (
+        {message.isOutboxPending && !message.isQueuedInServerMailbox && isUser && (
           <div className="outbox-queue-banner">
             <Radio size={12} className="pulse-icon text-warning" />
             <span>QUEUED IN LOCAL OUTBOX (PEER OFFLINE)</span>

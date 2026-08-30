@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DB_FILE = path.join(__dirname, 'users_db.json');
+const MAILBOX_FILE = path.join(__dirname, 'offline_mailbox.json');
 
 const app = express();
 app.use(cors());
@@ -29,6 +30,10 @@ const io = new Server(server, {
 // Map of all registered users on the network:
 // tag (e.g. '@narasimha') -> { socketId, username, tag, passwordHash, avatar, ip, lastSeen, status, customStatus }
 const registeredUsers = new Map();
+
+// Map of Offline Store-and-Forward Mailbox:
+// recipientTag -> [ { message, senderInfo, queuedAt } ]
+const offlineMailbox = new Map();
 
 // Helper to hash password with quantum salt
 function hashPassword(password, salt = 'chatforge_quantum_salt_v1') {
@@ -76,7 +81,39 @@ function saveUserDatabase() {
   }
 }
 
+// Load persistent store-and-forward offline mailbox
+function loadMailboxDatabase() {
+  try {
+    if (fs.existsSync(MAILBOX_FILE)) {
+      const data = fs.readFileSync(MAILBOX_FILE, 'utf8');
+      const parsed = JSON.parse(data);
+      Object.entries(parsed).forEach(([tag, msgs]) => {
+        offlineMailbox.set(tag.toLowerCase(), Array.isArray(msgs) ? msgs : []);
+      });
+      console.log(`[MAILBOX] Loaded offline queues for ${offlineMailbox.size} users from ${MAILBOX_FILE}`);
+    }
+  } catch (err) {
+    console.error('[MAILBOX] Error loading offline_mailbox.json:', err);
+  }
+}
+
+// Save persistent offline mailbox
+function saveMailboxDatabase() {
+  try {
+    const obj = {};
+    offlineMailbox.forEach((msgs, tag) => {
+      if (msgs && msgs.length > 0) {
+        obj[tag] = msgs;
+      }
+    });
+    fs.writeFileSync(MAILBOX_FILE, JSON.stringify(obj, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[MAILBOX] Error saving offline_mailbox.json:', err);
+  }
+}
+
 loadUserDatabase();
+loadMailboxDatabase();
 
 // Helper to sanitize user profile for client transmission (strips passwordHash)
 function sanitizeUser(user) {
@@ -114,6 +151,44 @@ app.get('/api/info', (req, res) => {
     registeredCount: registeredUsers.size,
   });
 });
+
+// Deliver all stored encrypted mailbox messages when a peer comes online
+function deliverPendingMailboxMessages(targetTag, targetSocket) {
+  const cleanTag = targetTag?.toLowerCase();
+  const pending = offlineMailbox.get(cleanTag) || [];
+
+  if (pending.length > 0) {
+    console.log(`[MAILBOX] Delivering ${pending.length} stored encrypted messages to ${cleanTag}`);
+    
+    // Deliver each message to the recipient socket
+    pending.forEach((item) => {
+      targetSocket.emit('receive_message', {
+        message: item.message,
+        senderInfo: item.senderInfo,
+        fromMailbox: true,
+      });
+
+      // If the sender is online, send delivery confirmation
+      const sender = registeredUsers.get(item.senderInfo?.tag?.toLowerCase());
+      if (sender && sender.socketId) {
+        io.to(sender.socketId).emit('message_delivered_ack', {
+          messageId: item.message.id,
+          recipientTag: cleanTag,
+          status: 'delivered',
+        });
+      }
+    });
+
+    // Also emit batch count for HUD notification
+    targetSocket.emit('mailbox_delivered_summary', {
+      count: pending.length,
+    });
+
+    // Drain mailbox
+    offlineMailbox.delete(cleanTag);
+    saveMailboxDatabase();
+  }
+}
 
 io.on('connection', (socket) => {
   const clientIP = socket.handshake.headers['x-forwarded-for'] || socket.handshake.address || '127.0.0.1';
@@ -186,6 +261,9 @@ io.on('connection', (socket) => {
 
       broadcastDirectory();
 
+      // Flush any pending encrypted store-and-forward mailbox messages!
+      deliverPendingMailboxMessages(tag, socket);
+
       socket.broadcast.emit('peer_online_event', {
         peer: safeUser,
         timestamp: Date.now(),
@@ -224,6 +302,9 @@ io.on('connection', (socket) => {
 
       broadcastDirectory();
 
+      // Flush any pending encrypted store-and-forward mailbox messages!
+      deliverPendingMailboxMessages(tag, socket);
+
       socket.broadcast.emit('peer_online_event', {
         peer: safeUser,
         timestamp: Date.now(),
@@ -246,6 +327,7 @@ io.on('connection', (socket) => {
       const safe = sanitizeUser(existing);
       socket.emit('registered', { peerInfo: safe, localIP, port: 3001, directory: getSanitizedDirectory() });
       broadcastDirectory();
+      deliverPendingMailboxMessages(tag, socket);
       socket.broadcast.emit('peer_online_event', { peer: safe, timestamp: Date.now() });
     }
   });
@@ -272,13 +354,14 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 3. Relay Message Protocol
+  // 3. Relay Message Protocol with Store-and-Forward Encrypted Mailbox
   socket.on('send_message', (payload) => {
     const sender = socket.userTag ? registeredUsers.get(socket.userTag) : null;
     if (!sender) return;
 
     const { recipientTag, message } = payload;
-    const recipient = registeredUsers.get(recipientTag?.toLowerCase());
+    const cleanRecipientTag = recipientTag?.toLowerCase();
+    const recipient = registeredUsers.get(cleanRecipientTag);
 
     if (recipient && recipient.status === 'online' && recipient.socketId) {
       // Recipient is ONLINE -> Deliver in real-time
@@ -290,15 +373,36 @@ io.on('connection', (socket) => {
       // Confirm delivered to sender
       socket.emit('message_delivered_ack', {
         messageId: message.id,
-        recipientTag,
+        recipientTag: cleanRecipientTag,
         status: 'delivered',
       });
     } else {
-      // Recipient is OFFLINE -> Notify sender to store in local outbox
+      // Recipient is OFFLINE -> Deposit in Zero-Knowledge Store-and-Forward Server Mailbox!
+      const currentQueue = offlineMailbox.get(cleanRecipientTag) || [];
+      const entry = {
+        message,
+        senderInfo: sanitizeUser(sender),
+        queuedAt: Date.now(),
+      };
+      
+      const filtered = currentQueue.filter(item => item.message?.id !== message.id);
+      filtered.push(entry);
+      offlineMailbox.set(cleanRecipientTag, filtered);
+      saveMailboxDatabase();
+
+      console.log(`[MAILBOX] Message ${message.id} from ${sender.tag} stored in encrypted mailbox for ${cleanRecipientTag} (Queue: ${filtered.length})`);
+
+      // Acknowledge to sender that server mailbox accepted the packet
+      socket.emit('message_queued_server_ack', {
+        messageId: message.id,
+        recipientTag: cleanRecipientTag,
+        queueCount: filtered.length,
+      });
+
       socket.emit('peer_offline_ack', {
         messageId: message.id,
-        recipientTag,
-        reason: 'RECIPIENT_OFFLINE_SAVED_TO_SENDER_OUTBOX',
+        recipientTag: cleanRecipientTag,
+        reason: 'SAVED_IN_SERVER_MAILBOX_WILL_DELIVER_ON_LOGIN',
       });
     }
   });

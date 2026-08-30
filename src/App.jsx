@@ -59,6 +59,7 @@ function createMessageObject(payload, isUser = true, hideSecondTick = false) {
     burnAfterRead: payload.burnAfterRead ?? false, // View-Once auto-delete default
     burnCountdown: payload.burnCountdown ?? null,
     isOutboxPending: payload.isOutboxPending ?? false,
+    isQueuedInServerMailbox: payload.isQueuedInServerMailbox ?? false,
   };
 }
 
@@ -317,9 +318,31 @@ function App() {
           const target = contactsRef.current.find((c) => c.tag === recipientTag);
           if (!target || !prev[target.id]) return prev;
           const updated = prev[target.id].map((m) =>
-            m.id === messageId ? { ...m, status: 'delivered', isOutboxPending: false } : m
+            m.id === messageId ? { ...m, status: 'delivered', isOutboxPending: false, isQueuedInServerMailbox: false } : m
           );
           return { ...prev, [target.id]: updated };
+        });
+      },
+
+      // Message securely deposited in Server Store-and-Forward Mailbox
+      onMessageQueuedInServerMailbox: ({ messageId, recipientTag }) => {
+        setMessages((prev) => {
+          const target = contactsRef.current.find((c) => c.tag === recipientTag);
+          if (!target || !prev[target.id]) return prev;
+          const updated = prev[target.id].map((m) =>
+            m.id === messageId ? { ...m, isQueuedInServerMailbox: true, isOutboxPending: false, status: 'queued_server' } : m
+          );
+          return { ...prev, [target.id]: updated };
+        });
+      },
+
+      // When user logs in and server mailbox delivers offline messages
+      onMailboxDeliveredSummary: ({ count }) => {
+        soundFX.playReceived();
+        notificationService.pushToast({
+          title: 'OFFLINE STORE-AND-FORWARD MAILBOX',
+          message: `Retrieved ${count} encrypted message(s) queued while you were offline!`,
+          type: 'success',
         });
       },
 
@@ -329,7 +352,7 @@ function App() {
           const target = contactsRef.current.find((c) => c.tag === recipientTag);
           if (!target || !prev[target.id]) return prev;
           const updated = prev[target.id].map((m) =>
-            m.id === messageId ? { ...m, isOutboxPending: true } : m
+            m.id === messageId ? { ...m, isQueuedInServerMailbox: true, isOutboxPending: false } : m
           );
           return { ...prev, [target.id]: updated };
         });

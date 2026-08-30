@@ -950,7 +950,13 @@
   border-bottom: 1px dashed rgba(255, 170, 0, 0.4);
 }
 
-.outbox-pending-tag {
+.server-mailbox-banner {
+  color: var(--accent);
+  border-bottom-color: rgba(0, 255, 102, 0.4);
+}
+
+.outbox-pending-tag,
+.server-mailbox-tag {
   display: flex;
   align-items: center;
 }
