@@ -253,13 +253,10 @@ io.on('connection', (socket) => {
         success: true,
         peerInfo: safeUser,
         localIP,
-        directory: getSanitizedDirectory(),
       };
 
       if (typeof callback === 'function') callback(resp);
       socket.emit('registered', resp);
-
-      broadcastDirectory();
 
       // Flush any pending encrypted store-and-forward mailbox messages!
       deliverPendingMailboxMessages(tag, socket);
@@ -294,13 +291,10 @@ io.on('connection', (socket) => {
         success: true,
         peerInfo: safeUser,
         localIP,
-        directory: getSanitizedDirectory(),
       };
 
       if (typeof callback === 'function') callback(resp);
       socket.emit('registered', resp);
-
-      broadcastDirectory();
 
       // Flush any pending encrypted store-and-forward mailbox messages!
       deliverPendingMailboxMessages(tag, socket);
@@ -325,27 +319,29 @@ io.on('connection', (socket) => {
       existing.lastSeen = 'online';
       socket.userTag = tag;
       const safe = sanitizeUser(existing);
-      socket.emit('registered', { peerInfo: safe, localIP, port: 3001, directory: getSanitizedDirectory() });
-      broadcastDirectory();
+      socket.emit('registered', { peerInfo: safe, localIP, port: 3001 });
       deliverPendingMailboxMessages(tag, socket);
       socket.broadcast.emit('peer_online_event', { peer: safe, timestamp: Date.now() });
     }
   });
 
-  // 2. Global Username Search
+  // 2. Private Codename Search (Requires exact or partial username, returns both online & offline registered users)
   socket.on('search_users', ({ query }, callback) => {
     const q = (query || '').toLowerCase().trim().replace(/^@/, '');
-    const allUsers = getSanitizedDirectory();
-
-    let matches = [];
-    if (!q) {
-      matches = allUsers;
-    } else {
-      matches = allUsers.filter(u => 
-        u.username.toLowerCase().includes(q) || 
-        u.tag.toLowerCase().includes(q)
-      );
+    
+    // Privacy protection: If no search query is entered, do NOT expose user list!
+    if (!q || q.length < 1) {
+      if (typeof callback === 'function') callback([]);
+      else socket.emit('search_results', []);
+      return;
     }
+
+    const allUsers = getSanitizedDirectory();
+    // Match by username or @tag across all registered users (online & offline)
+    const matches = allUsers.filter(u => 
+      u.username.toLowerCase().includes(q) || 
+      u.tag.toLowerCase().includes(q)
+    );
 
     if (typeof callback === 'function') {
       callback(matches);

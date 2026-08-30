@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Search, 
   UserPlus, 
@@ -7,10 +7,12 @@ import {
   Lock, 
   Unlock, 
   ShieldCheck, 
-  Users 
+  Users, 
+  Globe 
 } from 'lucide-react';
 import ChatItem from './ChatItem';
 import { soundFX } from '../services/audioService';
+import { socketService } from '../services/socketService';
 
 const Sidebar = ({
   contacts,
@@ -30,6 +32,7 @@ const Sidebar = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('all'); // 'all' | 'unread' | 'secret'
+  const [networkResults, setNetworkResults] = useState([]);
 
   const handleFilterChange = (filter) => {
     soundFX.playKeypress();
@@ -39,6 +42,26 @@ const Sidebar = ({
     }
     setActiveFilter(filter);
   };
+
+  // Live network search as user types a codename
+  useEffect(() => {
+    const query = searchQuery.trim().toLowerCase().replace(/^@/, '');
+    if (!query) {
+      return;
+    }
+
+    const debounceTimer = setTimeout(() => {
+      socketService.searchUsers(query, (results) => {
+        // Filter out contacts already present in user's sidebar
+        const notInContacts = (results || []).filter(
+          (user) => !contacts.some((c) => c.tag?.toLowerCase() === user.tag?.toLowerCase())
+        );
+        setNetworkResults(notInContacts);
+      });
+    }, 250);
+
+    return () => clearTimeout(debounceTimer);
+  }, [searchQuery, contacts]);
 
   // Filter contacts based on search query & active tab
   const filteredContacts = contacts.filter((c) => {
@@ -66,6 +89,28 @@ const Sidebar = ({
     return a.pinned ? -1 : 1;
   });
 
+  // Start chat with discovered user
+  const handleStartDiscoveredChat = (user) => {
+    soundFX.playSent();
+    onSelectContact({
+      id: user.id || `peer_${user.username.toLowerCase()}`,
+      name: user.username,
+      tag: user.tag,
+      avatar: user.avatar,
+      status: user.status || 'offline',
+      lastSeen: user.lastSeen || 'offline',
+      ip: user.ip || '192.168.1.x',
+      pgp: 'PGP-4096-LIVE-PEER',
+      unreadCount: 0,
+      pinned: false,
+      isSecret: false,
+      disappearingTimer: 0,
+      customStatus: user.customStatus || 'Registered Node',
+      bio: 'Discovered operator node on private mesh relay.',
+    });
+    setSearchQuery('');
+  };
+
   return (
     <aside className="sidebar">
       {/* Quick Action Top Bar */}
@@ -73,7 +118,7 @@ const Sidebar = ({
         <button 
           className="action-pill action-pill-primary" 
           onClick={() => { soundFX.playKeypress(); onOpenSearchUsers(); }}
-          title="Search Users by Username (No Phone Numbers)"
+          title="Search Users by Codename (No Phone Numbers)"
         >
           <UserPlus size={13} className="text-accent" />
           <span>FIND USER</span>
@@ -146,13 +191,27 @@ const Sidebar = ({
         <Search size={15} className="search-icon" />
         <input 
           type="text" 
-          placeholder="Filter conversations or search username..."
+          placeholder="Type @username to find anyone..."
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          onChange={(e) => {
+            const val = e.target.value;
+            setSearchQuery(val);
+            if (!val.trim()) {
+              setNetworkResults([]);
+            }
+          }}
           className="search-input"
         />
         {searchQuery && (
-          <button className="clear-search-btn" onClick={() => setSearchQuery('')}>×</button>
+          <button 
+            className="clear-search-btn" 
+            onClick={() => {
+              setSearchQuery('');
+              setNetworkResults([]);
+            }}
+          >
+            ×
+          </button>
         )}
       </div>
 
@@ -183,7 +242,44 @@ const Sidebar = ({
 
       {/* Contact List */}
       <div className="contacts-list">
-        {sortedContacts.length === 0 ? (
+        
+        {/* Network Discovery Results in Sidebar when searching */}
+        {searchQuery.trim() && networkResults.length > 0 && (
+          <div className="network-results-section">
+            <div className="network-results-header">
+              <Globe size={11} className="text-accent pulse-icon" />
+              <span>DISCOVERED USERS ({networkResults.length})</span>
+            </div>
+            {networkResults.map((user) => (
+              <div 
+                key={user.tag}
+                className="discovered-user-row"
+                onClick={() => handleStartDiscoveredChat(user)}
+              >
+                <div className="discovered-avatar-wrap">
+                  <img src={user.avatar} alt={user.username} className="discovered-avatar" />
+                  <span className={`status-dot ${user.status === 'online' ? 'online' : 'offline'}`}></span>
+                </div>
+                <div className="discovered-info">
+                  <div className="discovered-name-row">
+                    <span className="disc-name">{user.username}</span>
+                    <span className="disc-tag">{user.tag}</span>
+                  </div>
+                  <span className="disc-status">
+                    {user.status === 'online' ? '● Online' : `○ Offline (${user.lastSeen || 'Mailbox ready'})`}
+                  </span>
+                </div>
+                <button className="btn-disc-chat">
+                  <UserPlus size={13} />
+                  <span>CHAT</span>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Existing Conversations */}
+        {sortedContacts.length === 0 && (!searchQuery.trim() || networkResults.length === 0) ? (
           <div className="empty-contacts">
             <Users size={32} className="text-muted" />
             <p>NO ACTIVE CONVERSATIONS</p>
@@ -193,7 +289,7 @@ const Sidebar = ({
               onClick={() => { soundFX.playKeypress(); onOpenSearchUsers(); }}
             >
               <UserPlus size={13} />
-              <span>SEARCH USERNAME</span>
+              <span>FIND USER BY @CODENAME</span>
             </button>
           </div>
         ) : (
@@ -225,7 +321,7 @@ const Sidebar = ({
           <span>NODE: FORGE-CORE://LOCAL</span>
         </div>
         <span className="stealth-mode-label">
-          {gbSettings.freezeLastSeen ? 'STEALTH ACTIVE' : 'BROADCASTING'}
+          {gbSettings.freezeLastSeen ? 'STEALTH ACTIVE' : 'ZERO-DIRECTORY P2P'}
         </span>
       </div>
     </aside>

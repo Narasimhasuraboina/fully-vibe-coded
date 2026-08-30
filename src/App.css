@@ -4243,3 +4243,112 @@
 .toast-close-btn:hover {
   color: var(--danger);
 }
+
+/* Status Pills in User Discovery */
+.status-pill {
+  font-size: 9px;
+  font-weight: bold;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+.status-online {
+  color: var(--accent);
+  background: rgba(0, 255, 102, 0.12);
+  border: 1px solid var(--accent);
+}
+.status-offline {
+  color: #ffaa00;
+  background: rgba(255, 170, 0, 0.1);
+  border: 1px solid rgba(255, 170, 0, 0.4);
+}
+
+/* Network Discovery in Sidebar */
+.network-results-section {
+  padding: 8px 10px;
+  border-bottom: 1px dashed var(--border);
+  background: rgba(0, 255, 102, 0.03);
+  margin-bottom: 6px;
+}
+
+.network-results-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: bold;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+
+.discovered-user-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  margin-bottom: 4px;
+  transition: all 0.2s ease;
+}
+.discovered-user-row:hover {
+  border-color: var(--accent);
+  background: rgba(0, 255, 102, 0.08);
+}
+
+.discovered-avatar-wrap {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+}
+.discovered-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border);
+}
+
+.discovered-info {
+  flex: 1;
+  min-width: 0;
+}
+.discovered-name-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.disc-name {
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--text-main);
+}
+.disc-tag {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.disc-status {
+  font-size: 10px;
+  color: var(--text-muted);
+  display: block;
+}
+
+.btn-disc-chat {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(0, 255, 102, 0.15);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: bold;
+}
+.btn-disc-chat:hover {
+  background: var(--accent);
+  color: #000;
+}

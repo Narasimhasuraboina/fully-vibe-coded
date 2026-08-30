@@ -1,24 +1,32 @@
 import React, { useState, useEffect } from 'react';
-import { Search, UserPlus, X, MessageSquare, Shield } from 'lucide-react';
+import { Search, UserPlus, X, MessageSquare, Shield, Lock, Radio } from 'lucide-react';
 import { soundFX } from '../services/audioService';
 import { socketService } from '../services/socketService';
 
-const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, existingContacts }) => {
+const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, existingContacts = [] }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
 
   useEffect(() => {
-    // Initial fetch of directory or search as user types
     const query = searchQuery.trim().toLowerCase().replace(/^@/, '');
     
-    socketService.searchUsers(query, (results) => {
-      // Filter out self
-      const filtered = (results || []).filter(u => u.tag !== currentProfile.tag);
-      setSearchResults(filtered);
-      setIsSearching(false);
-    });
-  }, [searchQuery, currentProfile.tag]);
+    if (!query) {
+      return;
+    }
+
+    const debounceTimer = setTimeout(() => {
+      setIsSearching(true);
+      socketService.searchUsers(query, (results) => {
+        // Filter out self
+        const filtered = (results || []).filter(u => u.tag !== currentProfile?.tag);
+        setSearchResults(filtered);
+        setIsSearching(false);
+      });
+    }, 200);
+
+    return () => clearTimeout(debounceTimer);
+  }, [searchQuery, currentProfile?.tag]);
 
   const handleStartChat = (user) => {
     soundFX.playSent();
@@ -27,85 +35,112 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
       name: user.username,
       tag: user.tag,
       avatar: user.avatar,
-      status: user.status || 'online',
-      lastSeen: user.lastSeen || 'online',
+      status: user.status || 'offline',
+      lastSeen: user.lastSeen || 'offline',
       ip: user.ip || '192.168.1.x',
       pgp: 'PGP-4096-VERIFIED',
       unreadCount: 0,
       pinned: false,
       isSecret: false,
       disappearingTimer: 0,
-      customStatus: user.customStatus || 'Active Node',
-      bio: 'Discovered user node on mesh network.',
+      customStatus: user.customStatus || 'Registered Node',
+      bio: 'Discovered operator on private mesh network.',
     });
     onClose();
   };
 
   return (
-    <div className="modal-backdrop">
-      <div className="cyber-modal search-user-modal">
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="cyber-modal search-user-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">
             <Search size={16} className="text-accent" />
-            <span>DISCOVER USERS BY CODENAME</span>
+            <span>LOCATE OPERATOR BY CODENAME</span>
           </div>
           <button className="btn-close" onClick={onClose}><X size={16} /></button>
         </div>
 
         <div className="modal-body">
           <p className="modal-description">
-            Search for registered operators by their unique username. No phone numbers or emails required.
+            To text someone, enter their exact <strong>@username</strong>. Public user lists are hidden for zero-knowledge privacy.
           </p>
 
           <div className="search-input-box">
             <Search size={15} className="text-accent search-icon" />
             <input
               type="text"
-              placeholder="Search @username (e.g. narasimha, neo, shadow)..."
+              placeholder="Enter exact codename (e.g. narasimha, neo, shadow)..."
               value={searchQuery}
               onChange={(e) => {
                 soundFX.playKeypress();
-                setIsSearching(true);
-                setSearchQuery(e.target.value);
+                const val = e.target.value;
+                setSearchQuery(val);
+                if (!val.trim()) {
+                  setSearchResults([]);
+                  setIsSearching(false);
+                }
               }}
               autoFocus
               className="cyber-input search-input-field"
             />
             {searchQuery && (
-              <button className="clear-btn" onClick={() => setSearchQuery('')}>×</button>
+              <button 
+                className="clear-btn" 
+                onClick={() => {
+                  setSearchQuery('');
+                  setSearchResults([]);
+                  setIsSearching(false);
+                }}
+              >
+                ×
+              </button>
             )}
           </div>
 
           <div className="search-results-container">
-            <div className="results-header">
-              <span>REGISTERED NODES ({searchResults.length})</span>
-              {isSearching && <span className="text-accent">SCANNING MESH...</span>}
-            </div>
-
-            {searchResults.length === 0 ? (
+            {!searchQuery.trim() ? (
+              <div className="empty-search-state">
+                <Lock size={34} className="text-accent pulse-icon" />
+                <p>PRIVATE NETWORK // ZERO DIRECTORY LEAKAGE</p>
+                <span>Type the recipient's @username above to find them (whether they are online or offline).</span>
+              </div>
+            ) : isSearching ? (
+              <div className="empty-search-state">
+                <Radio size={32} className="text-accent pulse-icon" />
+                <p>SEARCHING SECURE MESH...</p>
+                <span>Scanning registered nodes for @{searchQuery.replace(/^@/, '')}...</span>
+              </div>
+            ) : searchResults.length === 0 ? (
               <div className="empty-search-state">
                 <Shield size={32} className="text-muted" />
-                <p>NO MATCHING OPERATOR FOUND</p>
-                <span>Make sure the user has logged in on their device with that username.</span>
+                <p>NO OPERATOR FOUND FOR "@{searchQuery.replace(/^@/, '')}"</p>
+                <span>Make sure the person has registered with this exact username on Chatforge.</span>
               </div>
             ) : (
               <div className="results-list">
+                <div className="results-header">
+                  <span>FOUND OPERATORS ({searchResults.length})</span>
+                </div>
                 {searchResults.map((user) => {
-                  const isAlreadyAdded = existingContacts.some(c => c.tag === user.tag);
+                  const isAlreadyAdded = existingContacts.some(c => c.tag?.toLowerCase() === user.tag?.toLowerCase());
+                  const isOnline = user.status === 'online';
 
                   return (
                     <div key={user.tag} className="user-result-card">
                       <div className="user-avatar-wrap">
                         <img src={user.avatar} alt={user.username} className="result-avatar" />
-                        <span className={`status-dot ${user.status}`}></span>
+                        <span className={`status-dot ${isOnline ? 'online' : 'offline'}`}></span>
                       </div>
 
                       <div className="user-info-wrap">
                         <div className="user-name-line">
                           <span className="user-name">{user.username}</span>
                           <span className="user-tag">{user.tag}</span>
+                          <span className={`status-pill ${isOnline ? 'status-online' : 'status-offline'}`}>
+                            {isOnline ? '● ONLINE' : '○ OFFLINE (MAILBOX READY)'}
+                          </span>
                         </div>
-                        <span className="user-bio">{user.customStatus}</span>
+                        <span className="user-bio">{user.customStatus || (isOnline ? 'Active on mesh' : `Last active: ${user.lastSeen || 'offline'}`)}</span>
                       </div>
 
                       <button
