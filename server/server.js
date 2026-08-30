@@ -176,14 +176,12 @@ function deliverPendingMailboxMessages(targetTag, targetSocket) {
       });
 
       // If the sender is online, send delivery confirmation
-      const sender = registeredUsers.get(normalizeTag(item.senderInfo?.tag));
-      if (sender && sender.socketId) {
-        io.to(sender.socketId).emit('message_delivered_ack', {
-          messageId: item.message?.id,
-          recipientTag: cleanTag,
-          status: 'delivered',
-        });
-      }
+      const senderTag = normalizeTag(item.senderInfo?.tag);
+      io.to(senderTag).emit('message_delivered_ack', {
+        messageId: item.message?.id,
+        recipientTag: cleanTag,
+        status: 'delivered',
+      });
     });
 
     // Also emit batch count for HUD notification
@@ -244,6 +242,7 @@ io.on('connection', (socket) => {
       }
 
       // Password verified! Login successful
+      socket.join(tag);
       existing.socketId = socket.id;
       existing.status = 'online';
       existing.lastSeen = 'online';
@@ -253,7 +252,7 @@ io.on('connection', (socket) => {
 
       socket.userTag = tag;
       saveUserDatabase();
-      console.log(`[AUTH SUCCESS] User ${cleanUser} (${tag}) authenticated.`);
+      console.log(`[AUTH SUCCESS] User ${cleanUser} (${tag}) authenticated on socket ${socket.id}.`);
 
       const safeUser = sanitizeUser(existing);
       const resp = {
@@ -275,6 +274,7 @@ io.on('connection', (socket) => {
 
     } else {
       // New User Registration
+      socket.join(tag);
       const newUser = {
         socketId: socket.id,
         username: cleanUser,
@@ -291,7 +291,7 @@ io.on('connection', (socket) => {
       registeredUsers.set(tag, newUser);
       socket.userTag = tag;
       saveUserDatabase();
-      console.log(`[REGISTER SUCCESS] New Operator ${cleanUser} (${tag}) registered and authenticated.`);
+      console.log(`[REGISTER SUCCESS] New Operator ${cleanUser} (${tag}) registered on socket ${socket.id}.`);
 
       const safeUser = sanitizeUser(newUser);
       const resp = {
@@ -316,11 +316,11 @@ io.on('connection', (socket) => {
   // Legacy fallback for register_peer
   socket.on('register_peer', (peerData) => {
     const rawUsername = peerData.username || `Operator_${socket.id.substring(0, 4)}`;
-    const cleanUser = rawUsername.trim().replace(/^@/, '');
-    const tag = `@${cleanUser.toLowerCase()}`;
+    const tag = normalizeTag(rawUsername);
     const existing = registeredUsers.get(tag);
 
     if (existing) {
+      socket.join(tag);
       existing.socketId = socket.id;
       existing.status = 'online';
       existing.lastSeen = 'online';
@@ -357,18 +357,21 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 3. Relay Message Protocol with Store-and-Forward Encrypted Mailbox
+  // 3. Relay Message Protocol with Room-based Delivery & Store-and-Forward Encrypted Mailbox
   socket.on('send_message', (payload) => {
     const sender = socket.userTag ? registeredUsers.get(normalizeTag(socket.userTag)) : null;
     if (!sender) return;
 
     const { recipientTag, message } = payload;
     const cleanRecipientTag = normalizeTag(recipientTag);
-    const recipient = registeredUsers.get(cleanRecipientTag);
 
-    if (recipient && recipient.status === 'online' && recipient.socketId) {
-      // Recipient is ONLINE -> Deliver in real-time
-      io.to(recipient.socketId).emit('receive_message', {
+    // Check if recipient has an active connected socket in their room
+    const recipientRoom = io.sockets.adapter.rooms.get(cleanRecipientTag);
+    const isRecipientConnected = recipientRoom && recipientRoom.size > 0;
+
+    if (isRecipientConnected) {
+      // Recipient is ONLINE -> Deliver in real-time to recipient's active socket(s)!
+      io.to(cleanRecipientTag).emit('receive_message', {
         message,
         senderInfo: sanitizeUser(sender),
       });
@@ -379,6 +382,8 @@ io.on('connection', (socket) => {
         recipientTag: cleanRecipientTag,
         status: 'delivered',
       });
+
+      console.log(`[DELIVERY LIVE] Message ${message?.id} from ${sender.tag} -> ${cleanRecipientTag} delivered live.`);
     } else {
       // Recipient is OFFLINE -> Deposit in Zero-Knowledge Store-and-Forward Server Mailbox!
       const currentQueue = offlineMailbox.get(cleanRecipientTag) || [];
@@ -412,24 +417,20 @@ io.on('connection', (socket) => {
 
   // 4. Burn-After-Read (View-Once) Protocol
   socket.on('message_viewed', ({ messageId, senderTag, burnDelay = 5 }) => {
-    const sender = registeredUsers.get(normalizeTag(senderTag));
+    const cleanSenderTag = normalizeTag(senderTag);
     const viewer = socket.userTag ? registeredUsers.get(normalizeTag(socket.userTag)) : null;
 
-    if (sender && sender.socketId) {
-      io.to(sender.socketId).emit('message_viewed_by_peer', {
-        messageId,
-        viewerTag: viewer?.tag,
-        burnDelay,
-      });
-    }
+    io.to(cleanSenderTag).emit('message_viewed_by_peer', {
+      messageId,
+      viewerTag: viewer?.tag,
+      burnDelay,
+    });
   });
 
   // 5. Message Shred Confirmation
   socket.on('message_shredded', ({ messageId, targetTag }) => {
-    const target = registeredUsers.get(normalizeTag(targetTag));
-    if (target && target.socketId) {
-      io.to(target.socketId).emit('message_shredded_ack', { messageId });
-    }
+    const cleanTargetTag = normalizeTag(targetTag);
+    io.to(cleanTargetTag).emit('message_shredded_ack', { messageId });
   });
 
   // 6. Real-Time Typing Indicator
@@ -437,21 +438,21 @@ io.on('connection', (socket) => {
     const sender = socket.userTag ? registeredUsers.get(normalizeTag(socket.userTag)) : null;
     if (!sender) return;
 
-    const recipient = registeredUsers.get(normalizeTag(recipientTag));
-    if (recipient && recipient.socketId) {
-      io.to(recipient.socketId).emit('peer_typing', {
-        senderTag: sender.tag,
-        isTyping,
-      });
-    }
+    const cleanRecipientTag = normalizeTag(recipientTag);
+    io.to(cleanRecipientTag).emit('peer_typing', {
+      senderTag: sender.tag,
+      isTyping,
+    });
   });
 
   // 7. WebRTC Audio / Video Call Signaling
   socket.on('call_offer', (data) => {
     const sender = socket.userTag ? registeredUsers.get(normalizeTag(socket.userTag)) : null;
-    const target = registeredUsers.get(normalizeTag(data.targetTag));
-    if (target && target.socketId) {
-      io.to(target.socketId).emit('incoming_call_signal', {
+    const cleanTargetTag = normalizeTag(data.targetTag);
+    const targetRoom = io.sockets.adapter.rooms.get(cleanTargetTag);
+
+    if (targetRoom && targetRoom.size > 0) {
+      io.to(cleanTargetTag).emit('incoming_call_signal', {
         callerInfo: sanitizeUser(sender),
         callType: data.callType,
         offer: data.offer,
@@ -462,66 +463,59 @@ io.on('connection', (socket) => {
   });
 
   socket.on('call_answer', (data) => {
-    const caller = registeredUsers.get(normalizeTag(data.callerTag));
-    if (caller && caller.socketId) {
-      io.to(caller.socketId).emit('call_answered_signal', {
-        answer: data.answer,
-      });
-    }
+    const cleanCallerTag = normalizeTag(data.callerTag);
+    io.to(cleanCallerTag).emit('call_answered_signal', {
+      answer: data.answer,
+    });
   });
 
   socket.on('ice_candidate', (data) => {
-    const target = registeredUsers.get(normalizeTag(data.targetTag));
-    if (target && target.socketId) {
-      io.to(target.socketId).emit('ice_candidate_signal', {
-        candidate: data.candidate,
-        fromTag: socket.userTag,
-      });
-    }
+    const cleanTargetTag = normalizeTag(data.targetTag);
+    io.to(cleanTargetTag).emit('ice_candidate_signal', {
+      candidate: data.candidate,
+      fromTag: socket.userTag,
+    });
   });
 
   socket.on('call_reject', (data) => {
-    const caller = registeredUsers.get(normalizeTag(data.callerTag));
-    if (caller && caller.socketId) {
-      io.to(caller.socketId).emit('call_rejected_signal', {
-        reason: data.reason || 'CALL_DECLINED_BY_PEER',
-      });
-    }
+    const cleanCallerTag = normalizeTag(data.callerTag);
+    io.to(cleanCallerTag).emit('call_rejected_signal', {
+      reason: data.reason || 'CALL_DECLINED_BY_PEER',
+    });
   });
 
   socket.on('call_end', (data) => {
-    const target = registeredUsers.get(normalizeTag(data.targetTag));
-    if (target && target.socketId) {
-      io.to(target.socketId).emit('call_ended_signal');
-    }
+    const cleanTargetTag = normalizeTag(data.targetTag);
+    io.to(cleanTargetTag).emit('call_ended_signal');
   });
 
   // 8. Disconnect Handler
   socket.on('disconnect', () => {
     if (socket.userTag) {
-      const user = registeredUsers.get(socket.userTag);
-      if (user) {
-        user.status = 'offline';
-        user.lastSeen = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        user.socketId = null;
+      const tag = normalizeTag(socket.userTag);
+      const room = io.sockets.adapter.rooms.get(tag);
+      const stillOnline = room && room.size > 0;
 
-        console.log(`[USER OFFLINE] ${user.username} (${user.tag}) went offline`);
+      if (!stillOnline) {
+        const user = registeredUsers.get(tag);
+        if (user) {
+          user.status = 'offline';
+          user.lastSeen = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          user.socketId = null;
 
-        socket.broadcast.emit('peer_offline_event', {
-          tag: user.tag,
-          lastSeen: user.lastSeen,
-        });
+          console.log(`[USER OFFLINE] ${user.username} (${user.tag}) went offline`);
 
-        broadcastDirectory();
+          socket.broadcast.emit('peer_offline_event', {
+            tag: user.tag,
+            lastSeen: user.lastSeen,
+          });
+        }
       }
     }
   });
 });
 
-function broadcastDirectory() {
-  const directory = getSanitizedDirectory();
-  io.emit('online_peers_list', directory);
-}
+
 
 // Serve static frontend files for single-port / production / tunneling
 const DIST_PATH = path.join(__dirname, '../dist');
