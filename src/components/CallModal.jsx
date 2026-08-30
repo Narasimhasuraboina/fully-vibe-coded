@@ -51,11 +51,13 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
   const [callStatus, setCallStatus] = useState(isIncoming ? 'CONNECTING SIGNAL...' : 'DIALING NODE...');
   const [freqBars, setFreqBars] = useState(Array.from({ length: 16 }, () => 20));
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
   const [stats, setStats] = useState({ rtt: 18, packetLoss: 0, bitrate: '128 kbps', cipher: 'AES-GCM-256' });
 
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const localStreamRef = useRef(null);
+  const remoteStreamRef = useRef(null);
   const screenStreamRef = useRef(null);
   const peerConnRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -164,10 +166,24 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
         // Remote stream track receiver
         pc.ontrack = (event) => {
           console.log('[WEBRTC] Remote track received:', event.track.kind);
-          if (remoteVideoRef.current && event.streams[0]) {
-            remoteVideoRef.current.srcObject = event.streams[0];
+          let inboundStream = remoteStreamRef.current;
+          if (!inboundStream) {
+            inboundStream = event.streams && event.streams[0] ? event.streams[0] : new MediaStream();
+            remoteStreamRef.current = inboundStream;
           }
-          setCallStatus('ENCRYPTED P2P LINK ESTABLISHED');
+          if (!inboundStream.getTracks().includes(event.track)) {
+            inboundStream.addTrack(event.track);
+          }
+
+          if (event.track.kind === 'video') {
+            setHasRemoteVideo(true);
+          }
+
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = inboundStream;
+            remoteVideoRef.current.play().catch((e) => console.warn('[WEBRTC] remote play note:', e));
+          }
+          setCallStatus('CONNECTED // AES-256 QUANTUM LINK');
         };
 
         // ICE candidate handler
@@ -456,16 +472,18 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
                   ref={remoteVideoRef}
                   autoPlay
                   playsInline
-                  className="remote-video-elem"
+                  className={`remote-video-elem ${!hasRemoteVideo ? 'video-pending' : 'video-live'}`}
                 />
-                <div className="target-face-box">
-                  <div className="corner c-tl"></div>
-                  <div className="corner c-tr"></div>
-                  <div className="corner c-bl"></div>
-                  <div className="corner c-br"></div>
-                  <img src={contact.avatar} alt={contact.name} className="feed-avatar-blur" />
-                  <span className="face-tag">NODE_LOCK: {contact.name}</span>
-                </div>
+                {!hasRemoteVideo && (
+                  <div className="target-face-box">
+                    <div className="corner c-tl"></div>
+                    <div className="corner c-tr"></div>
+                    <div className="corner c-bl"></div>
+                    <div className="corner c-br"></div>
+                    <img src={contact.avatar} alt={contact.name} className="feed-avatar-blur" />
+                    <span className="face-tag">CONNECTING OPTICAL FEED: {contact.name}</span>
+                  </div>
+                )}
               </div>
 
               {/* Local Video Stream Picture-in-Picture */}
