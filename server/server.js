@@ -559,19 +559,28 @@ io.on('connection', (socket) => {
 
 
 
+// Health check endpoint for Render / Cloud deployments
+app.get('/healthz', (req, res) => {
+  res.status(200).send('OK');
+});
+
 // Serve static frontend files for single-port / production / tunneling
 const DIST_PATH = path.join(__dirname, '../dist');
 if (fs.existsSync(DIST_PATH)) {
   app.use(express.static(DIST_PATH));
   app.use((req, res, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
+    if (req.path.startsWith('/api') || req.path.startsWith('/socket.io') || req.path === '/healthz') {
       return next();
     }
-    res.sendFile(path.join(DIST_PATH, 'index.html'));
+    res.sendFile(path.join(DIST_PATH, 'index.html'), (err) => {
+      if (err) {
+        next();
+      }
+    });
   });
 } else {
   app.use((req, res, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
+    if (req.path.startsWith('/api') || req.path.startsWith('/socket.io') || req.path === '/healthz') {
       return next();
     }
     res.status(200).send(`
@@ -591,6 +600,29 @@ if (fs.existsSync(DIST_PATH)) {
     `);
   });
 }
+
+// Global process error handlers to prevent unexpected exits
+process.on('uncaughtException', (err) => {
+  console.error('[UNCAUGHT EXCEPTION]:', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[UNHANDLED REJECTION]:', reason);
+});
+
+process.on('SIGTERM', () => {
+  console.log('[SERVER] SIGTERM received, saving state and exiting...');
+  saveUserDatabase();
+  saveMailboxDatabase();
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('[SERVER] SIGINT received, saving state and exiting...');
+  saveUserDatabase();
+  saveMailboxDatabase();
+  process.exit(0);
+});
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
