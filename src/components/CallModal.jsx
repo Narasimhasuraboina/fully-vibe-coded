@@ -106,34 +106,98 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
     }
   }, []);
 
-  // Cleanup helper
+  // Cleanup helper - 100% Guaranteed Hardware Track Release (Camera & Mic)
   const cleanUpAllStreams = useCallback(() => {
-    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close().catch(() => {});
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+
+    if (audioContextRef.current) {
+      try {
+        if (audioContextRef.current.state !== 'closed') {
+          audioContextRef.current.close().catch(() => {});
+        }
+      } catch {}
+      audioContextRef.current = null;
     }
 
     if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((t) => t.stop());
+      localStreamRef.current.getTracks().forEach((t) => {
+        try {
+          t.stop();
+          t.enabled = false;
+        } catch {}
+      });
       localStreamRef.current = null;
     }
 
     if (screenStreamRef.current) {
-      screenStreamRef.current.getTracks().forEach((t) => t.stop());
+      screenStreamRef.current.getTracks().forEach((t) => {
+        try {
+          t.stop();
+          t.enabled = false;
+        } catch {}
+      });
       screenStreamRef.current = null;
     }
 
+    if (remoteStreamRef.current) {
+      remoteStreamRef.current.getTracks().forEach((t) => {
+        try {
+          t.stop();
+          t.enabled = false;
+        } catch {}
+      });
+      remoteStreamRef.current = null;
+    }
+
+    if (localVideoRef.current) {
+      if (localVideoRef.current.srcObject) {
+        try {
+          localVideoRef.current.srcObject.getTracks().forEach((t) => {
+            t.stop();
+            t.enabled = false;
+          });
+        } catch {}
+      }
+      localVideoRef.current.srcObject = null;
+    }
+
+    if (remoteVideoRef.current) {
+      if (remoteVideoRef.current.srcObject) {
+        try {
+          remoteVideoRef.current.srcObject.getTracks().forEach((t) => {
+            t.stop();
+            t.enabled = false;
+          });
+        } catch {}
+      }
+      remoteVideoRef.current.srcObject = null;
+    }
+
     if (peerConnRef.current) {
-      peerConnRef.current.close();
+      try {
+        peerConnRef.current.getSenders().forEach((sender) => {
+          if (sender.track) {
+            try {
+              sender.track.stop();
+              sender.track.enabled = false;
+            } catch {}
+          }
+        });
+        peerConnRef.current.close();
+      } catch {}
       peerConnRef.current = null;
     }
+
     iceCandidateQueueRef.current = [];
     isRemoteDescSetRef.current = false;
+    setHasRemoteVideo(false);
   }, []);
 
   // End Call handler
   const handleEndCall = useCallback(() => {
-    soundFX.playGlitchAlarm();
     if (contact?.tag) {
       socketService.emitCallEnd(contact.tag);
     }
@@ -351,8 +415,16 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
       });
     }
 
+    const handleWindowUnload = () => {
+      cleanUpAllStreams();
+    };
+    window.addEventListener('beforeunload', handleWindowUnload);
+    window.addEventListener('pagehide', handleWindowUnload);
+
     return () => {
       isCancelled = true;
+      window.removeEventListener('beforeunload', handleWindowUnload);
+      window.removeEventListener('pagehide', handleWindowUnload);
       cleanUpAllStreams();
     };
   }, [callType, contact, incomingOffer, isIncoming, callerSocketId, cleanUpAllStreams, handleEndCall, setupAudioAnalyser, drainIceCandidateQueue]);
