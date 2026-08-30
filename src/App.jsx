@@ -70,17 +70,8 @@ function App() {
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [serverInfo, setServerInfo] = useState(null);
 
-  // State Initialization (Strictly deduplicated by @tag)
-  const [contacts, setContacts] = useState(() => {
-    const raw = loadState('contacts', INITIAL_CONTACTS) || [];
-    const seen = new Set();
-    return raw.filter(c => {
-      const tag = (c.tag || `@${c.name || ''}`).toLowerCase().trim();
-      if (!tag || tag === '@' || seen.has(tag)) return false;
-      seen.add(tag);
-      return true;
-    });
-  });
+  // State Initialization
+  const [contacts, setContacts] = useState(() => loadState('contacts', INITIAL_CONTACTS));
   const [messages, setMessages] = useState(() => loadState('messages', INITIAL_MESSAGES));
   const [stories, setStories] = useState(() => loadState('stories', INITIAL_STORIES));
   const [autoReplies, setAutoReplies] = useState(() => loadState('auto_replies', INITIAL_AUTO_REPLIES));
@@ -228,50 +219,11 @@ function App() {
     }
   }, [activeContactId]);
 
-  // Window & Tab Visibility: Only trigger view-once countdown when user is actively looking at the screen!
-  useEffect(() => {
-    const handleVisibilityResume = () => {
-      if (typeof document !== 'undefined' && !document.hidden && document.visibilityState === 'visible') {
-        const currentActiveId = activeContactRef.current;
-        if (!currentActiveId) return;
-
-        const currentContact = contactsRef.current.find((c) => c.id === currentActiveId);
-        
-        setMessages((prev) => {
-          const thread = prev[currentActiveId] || [];
-          let modified = false;
-          const updated = thread.map((m) => {
-            if (m.sender !== 'user' && (m.burnCountdown === null || m.burnCountdown === undefined)) {
-              modified = true;
-              if (currentContact?.tag) {
-                socketService.emitMessageViewed(m.id, currentContact.tag, 10);
-              }
-              return { ...m, status: 'read', burnCountdown: 10 };
-            }
-            return m;
-          });
-          return modified ? { ...prev, [currentActiveId]: updated } : prev;
-        });
-
-        // Clear unread count for the active contact
-        setContacts((prev) =>
-          prev.map((c) => (c.id === currentActiveId ? { ...c, unreadCount: 0 } : c))
-        );
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityResume);
-    window.addEventListener('focus', handleVisibilityResume);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityResume);
-      window.removeEventListener('focus', handleVisibilityResume);
-    };
-  }, []);
-
   // Real-time Message Reception Handler
   const handleIncomingSocketMessage = useCallback((payload) => {
     const { message, senderInfo } = payload;
     if (!message) return;
+    soundFX.playReceived();
 
     const senderUsername = senderInfo?.username || 'Peer';
     const cleanSenderTag = (senderInfo?.tag || `@${senderUsername}`).toLowerCase().trim();
@@ -285,15 +237,7 @@ function App() {
     );
     let targetContactId = senderContact?.id;
 
-    // Check if user is actively looking at this tab and this specific conversation
-    const isTabActiveAndVisible = Boolean(
-      typeof document !== 'undefined' && 
-      !document.hidden && 
-      document.visibilityState === 'visible'
-    );
-
     const isCurrentlyViewing = Boolean(
-      isTabActiveAndVisible &&
       activeContactRef.current &&
       (activeContactRef.current === targetContactId ||
        (senderContact && (activeContactRef.current === senderContact.id || (senderContact.tag && activeContactRef.current.toLowerCase() === senderContact.tag.toLowerCase()))))
@@ -317,10 +261,7 @@ function App() {
         customStatus: senderInfo?.customStatus || 'Connected Live Peer Node',
         bio: 'Real-time connected client device on mesh relay.',
       };
-      setContacts((prev) => [
-        senderContact, 
-        ...prev.filter(c => c.tag?.toLowerCase() !== cleanSenderTag && c.id !== targetContactId)
-      ]);
+      setContacts((prev) => [senderContact, ...prev]);
       if (!activeContactRef.current && typeof window !== 'undefined' && window.innerWidth >= 768) {
         setActiveContactId(targetContactId);
       }
@@ -359,7 +300,7 @@ function App() {
       };
     });
 
-    // Auto-view signal only if recipient is actively viewing this tab and chat right now!
+    // Auto-view signal if recipient is actively reading this chat right now
     if (isCurrentlyViewing) {
       socketService.emitMessageViewed(message.id, senderInfo?.tag || cleanSenderTag, 10);
     }

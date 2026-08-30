@@ -107,30 +107,27 @@ class RealtimeSocketService {
     this.currentProfile = profile;
     const serverUrl = this.getServerUrl();
 
-    if (!this.socket) {
-      this.socket = io(serverUrl, {
-        transports: ['websocket', 'polling'],
-        reconnection: true,
-        reconnectionAttempts: Infinity,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-      });
+    if (this.socket) {
+      this.socket.disconnect();
     }
 
-    // Cleanly rebind listeners on the existing socket
-    this.socket.removeAllListeners();
+    this.socket = io(serverUrl, {
+      transports: ['websocket', 'polling'],
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+    });
 
     this.socket.on('connect', () => {
       this.isConnected = true;
-      console.log('[REALTIME] Connected to Relay Server (Socket ID: ' + this.socket.id + ')');
+      console.log('[REALTIME] Connected to Chatforge Relay Server');
       
-      // Authenticate if profile is available
-      if (this.currentProfile) {
+      // If user has credentials, authenticate securely
+      if (profile) {
         this.socket.emit('authenticate_user', {
-          username: this.currentProfile.username,
-          password: this.currentProfile.password,
-          avatar: this.currentProfile.avatar,
-          customStatus: this.currentProfile.customStatus,
+          username: profile.username,
+          password: profile.password,
+          avatar: profile.avatar,
+          customStatus: profile.customStatus,
           isRegisterMode: false,
         }, (res) => {
           if (res && res.success) {
@@ -141,23 +138,6 @@ class RealtimeSocketService {
 
       if (callbacks.onConnect) callbacks.onConnect();
     });
-
-    // If socket is already active and connected, authenticate immediately
-    if (this.socket.connected && this.currentProfile) {
-      this.isConnected = true;
-      this.socket.emit('authenticate_user', {
-        username: this.currentProfile.username,
-        password: this.currentProfile.password,
-        avatar: this.currentProfile.avatar,
-        customStatus: this.currentProfile.customStatus,
-        isRegisterMode: false,
-      }, (res) => {
-        if (res && res.success) {
-          if (callbacks.onRegistered) callbacks.onRegistered(res);
-        }
-      });
-      if (callbacks.onConnect) callbacks.onConnect();
-    }
 
     this.socket.on('disconnect', () => {
       this.isConnected = false;

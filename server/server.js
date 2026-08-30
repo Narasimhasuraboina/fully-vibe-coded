@@ -573,15 +573,11 @@ if (fs.existsSync(DIST_PATH)) {
     if (req.path.startsWith('/api') || req.path.startsWith('/socket.io') || req.path === '/healthz') {
       return next();
     }
-    res.sendFile(path.join(DIST_PATH, 'index.html'), (err) => {
-      if (err) {
-        next();
-      }
-    });
+    res.sendFile(path.join(DIST_PATH, 'index.html'));
   });
 } else {
   app.use((req, res, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/socket.io') || req.path === '/healthz') {
+    if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
       return next();
     }
     res.status(200).send(`
@@ -601,29 +597,6 @@ if (fs.existsSync(DIST_PATH)) {
     `);
   });
 }
-
-// Global process error handlers to prevent unexpected exits
-process.on('uncaughtException', (err) => {
-  console.error('[UNCAUGHT EXCEPTION]:', err);
-});
-
-process.on('unhandledRejection', (reason) => {
-  console.error('[UNHANDLED REJECTION]:', reason);
-});
-
-process.on('SIGTERM', () => {
-  console.log('[SERVER] SIGTERM received, saving state and exiting...');
-  saveUserDatabase();
-  saveMailboxDatabase();
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  console.log('[SERVER] SIGINT received, saving state and exiting...');
-  saveUserDatabase();
-  saveMailboxDatabase();
-  process.exit(0);
-});
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
