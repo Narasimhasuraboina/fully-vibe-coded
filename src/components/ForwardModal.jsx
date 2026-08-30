@@ -40,16 +40,16 @@ const ForwardModal = ({ message, contacts = [], onClose, onForwardMessage }) => 
   };
 
   return (
-    <div className="cyber-modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop cyber-modal-backdrop" onClick={onClose}>
       <div className="cyber-modal forward-modal" onClick={(e) => e.stopPropagation()}>
         
         {/* Header */}
-        <div className="cyber-modal-header">
+        <div className="modal-header cyber-modal-header">
           <div className="modal-title">
             <CornerUpRight size={18} className="text-accent" />
             <span>FORWARD ENCRYPTED PAYLOAD</span>
           </div>
-          <button className="cyber-modal-close" onClick={onClose}>
+          <button className="btn-close cyber-modal-close" onClick={onClose}>
             <X size={18} />
           </button>
         </div>

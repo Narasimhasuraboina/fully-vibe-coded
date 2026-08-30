@@ -25,8 +25,8 @@ const ScheduleModal = ({ contacts, activeContact, onClose, onScheduleMessage }) 
   };
 
   return (
-    <div className="modal-backdrop">
-      <div className="cyber-modal">
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="cyber-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">
             <Calendar size={16} className="text-accent" />

@@ -41,16 +41,16 @@ const MediaGalleryModal = ({ contact, messages = [], onClose, onOpenMedia }) => 
   });
 
   return (
-    <div className="cyber-modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop cyber-modal-backdrop" onClick={onClose}>
       <div className="cyber-modal media-vault-modal" onClick={(e) => e.stopPropagation()}>
         
         {/* Header */}
-        <div className="cyber-modal-header">
+        <div className="modal-header cyber-modal-header">
           <div className="modal-title">
             <Shield size={18} className="text-accent" />
             <span>SESSION VAULT // {contact?.name || 'NODE'}</span>
           </div>
-          <button className="cyber-modal-close" onClick={onClose}>
+          <button className="btn-close cyber-modal-close" onClick={onClose}>
             <X size={18} />
           </button>
         </div>

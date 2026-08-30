@@ -79,8 +79,14 @@ function App() {
   const [gbSettings, setGbSettings] = useState(() => loadState('gb_settings', DEFAULT_GB_SETTINGS));
   const [theme, setTheme] = useState(() => gbSettings.theme || 'matrix');
 
-  // Active Context State
-  const [activeContactId, setActiveContactId] = useState(() => contacts[0]?.id || null);
+  // Active Context State (Mobile starts at contact list if screen is small)
+  const [activeContactId, setActiveContactId] = useState(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      return null;
+    }
+    const savedContacts = loadState('contacts', INITIAL_CONTACTS);
+    return savedContacts[0]?.id || null;
+  });
   const [typingStatus, setTypingStatus] = useState({}); // { [contactId]: boolean }
 
   // Modals & Panels
@@ -804,7 +810,7 @@ function App() {
       />
 
       {/* Main Split Layout */}
-      <div className="chatforge-main-layout">
+      <div className={`chatforge-main-layout ${activeContact ? 'has-active-chat' : 'no-active-chat'}`}>
         
         {/* Left Sidebar */}
         <Sidebar
@@ -847,6 +853,7 @@ function App() {
           isTyping={typingStatus[activeContact?.id]}
           gbSettings={gbSettings}
           onClearThread={handleClearThread}
+          onBack={() => setActiveContactId(null)}
         />
 
         {/* Right Hacker Inspector & Console Drawer */}

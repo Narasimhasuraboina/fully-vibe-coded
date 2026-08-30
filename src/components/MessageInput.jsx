@@ -37,6 +37,7 @@ const MessageInput = ({ onSendMessage, replyingTo, onCancelReply, activeContact 
   const videoInputRef = useRef(null);
   const docInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+  const composerRef = useRef(null);
   const inputRef = useRef(null);
   
   // Voice Recording Refs
@@ -45,9 +46,20 @@ const MessageInput = ({ onSendMessage, replyingTo, onCancelReply, activeContact 
   const recordTimerRef = useRef(null);
   const typingTimeoutRef = useRef(null);
 
-  // Clean up typing on unmount
+  // Clean up typing and listeners on unmount
   useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (composerRef.current && !composerRef.current.contains(e.target)) {
+        setShowAttachMenu(false);
+        setShowEmojiPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+
     return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       if (recordTimerRef.current) clearInterval(recordTimerRef.current);
     };
@@ -330,6 +342,7 @@ const MessageInput = ({ onSendMessage, replyingTo, onCancelReply, activeContact 
 
   return (
     <div 
+      ref={composerRef}
       className={`message-composer-wrapper ${isDragging ? 'composer-dragging' : ''}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -577,11 +590,14 @@ const MessageInput = ({ onSendMessage, replyingTo, onCancelReply, activeContact 
             <input 
               ref={inputRef}
               type="text" 
-              placeholder={`Transmit encrypted signal to ${activeContact?.name || 'node'}... (Paste image / Drop files)`}
+              placeholder={`Transmit encrypted signal to ${activeContact?.name || 'node'}...`}
               value={text}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
               className="composer-input"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck="false"
             />
           </form>
 

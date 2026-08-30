@@ -14,7 +14,8 @@ import {
   Radio, 
   X, 
   FolderLock,
-  UserX 
+  UserX,
+  ArrowLeft
 } from 'lucide-react';
 import MessageItem from './MessageItem';
 import MessageInput from './MessageInput';
@@ -37,7 +38,8 @@ const ChatArea = ({
   onDeleteContact,
   isTyping,
   gbSettings,
-  onClearThread
+  onClearThread,
+  onBack
 }) => {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -46,6 +48,23 @@ const ChatArea = ({
   const [showDisappearingMenu, setShowDisappearingMenu] = useState(false);
 
   const messagesEndRef = useRef(null);
+  const dropdownRef = useRef(null);
+
+  // Outside click listener for dropdowns
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setShowOptionsDropdown(false);
+        setShowDisappearingMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, []);
 
   const currentMessages = activeContact ? (messages[activeContact.id] || []) : [];
 
@@ -117,7 +136,22 @@ const ChatArea = ({
   return (
     <main className="chatarea">
       {/* Active Contact Header */}
-      <div className="chatarea-header">
+      <div className="chatarea-header" ref={dropdownRef}>
+        
+        {/* Mobile Back to Contacts Button */}
+        {onBack && (
+          <button 
+            className="mobile-back-btn" 
+            onClick={() => {
+              soundFX.playKeypress();
+              onBack();
+            }}
+            title="Back to Frequency Channels Matrix"
+          >
+            <ArrowLeft size={18} />
+          </button>
+        )}
+
         <div className="contact-intel-box">
           <div className="avatar-box">
             <img src={activeContact.avatar} alt={activeContact.name} className="chat-avatar" />
@@ -136,8 +170,8 @@ const ChatArea = ({
             </div>
 
             <div className="intel-meta-row">
-              <span className="meta-ip">IP: {activeContact.ip || '192.168.1.100'}</span>
-              <span className="meta-pgp">KEY: {activeContact.pgp || 'PGP-4096-SEC'}</span>
+              <span className="meta-ip hide-mobile">IP: {activeContact.ip || '192.168.1.100'}</span>
+              <span className="meta-pgp hide-mobile">KEY: {activeContact.pgp || 'PGP-4096-SEC'}</span>
               <span className="meta-seen">{activeContact.status === 'online' ? '● ONLINE' : `LAST SEEN: ${activeContact.lastSeen}`}</span>
             </div>
           </div>
@@ -147,8 +181,8 @@ const ChatArea = ({
         <div className="chatarea-actions">
           {/* E2EE Security Cipher Inspector */}
           <button 
-            className="action-icon-btn e2ee-btn"
-            onClick={() => onOpenEncryptionModal && onOpenEncryptionModal(activeContact)}
+            className="action-icon-btn e2ee-btn hide-mobile"
+            onClick={() => { if (onOpenEncryptionModal) onOpenEncryptionModal(activeContact); }}
             title="Inspect E2EE Cipher & Safety Numbers"
           >
             <ShieldCheck size={17} className="text-accent" />
@@ -156,8 +190,8 @@ const ChatArea = ({
 
           {/* Session Media Vault Drawer */}
           <button 
-            className="action-icon-btn"
-            onClick={() => onOpenMediaVault && onOpenMediaVault(activeContact)}
+            className="action-icon-btn hide-mobile"
+            onClick={() => { if (onOpenMediaVault) onOpenMediaVault(activeContact); }}
             title="Open Chat Media & Payload Vault"
           >
             <FolderLock size={17} />
@@ -183,7 +217,7 @@ const ChatArea = ({
 
           {/* In-Chat Search */}
           <button 
-            className={`action-icon-btn ${searchOpen ? 'active' : ''}`} 
+            className={`action-icon-btn hide-mobile ${searchOpen ? 'active' : ''}`} 
             onClick={() => {
               setSearchOpen(!searchOpen);
               if (searchOpen) setSearchTerm('');
@@ -193,8 +227,8 @@ const ChatArea = ({
             <Search size={17} />
           </button>
 
-          {/* Disappearing Timer Button */}
-          <div className="disappearing-menu-wrapper">
+          {/* Disappearing Timer Button (Desktop) */}
+          <div className="disappearing-menu-wrapper hide-mobile">
             <button 
               className={`action-icon-btn ${activeContact.disappearingTimer > 0 ? 'active' : ''}`}
               onClick={() => setShowDisappearingMenu(!showDisappearingMenu)}
@@ -220,13 +254,29 @@ const ChatArea = ({
             <button 
               className="action-icon-btn"
               onClick={() => setShowOptionsDropdown(!showOptionsDropdown)}
-              title="Session Options"
+              title="Session Options & Security"
             >
               <MoreVertical size={17} />
             </button>
 
             {showOptionsDropdown && (
               <div className="options-dropdown">
+                <button onClick={() => { setShowOptionsDropdown(false); if (onOpenEncryptionModal) onOpenEncryptionModal(activeContact); }}>
+                  <ShieldCheck size={14} className="text-accent" /> Verify Safety Cipher (E2EE)
+                </button>
+                <button onClick={() => { setShowOptionsDropdown(false); if (onOpenMediaVault) onOpenMediaVault(activeContact); }}>
+                  <FolderLock size={14} /> Media & Payload Vault
+                </button>
+                <button onClick={() => { setShowOptionsDropdown(false); setSearchOpen(!searchOpen); }}>
+                  <Search size={14} /> Search in Chat
+                </button>
+                <button onClick={() => { 
+                  setShowOptionsDropdown(false); 
+                  const nextTimer = activeContact.disappearingTimer > 0 ? 0 : 10;
+                  setTimer(nextTimer);
+                }}>
+                  <Clock size={14} /> {activeContact.disappearingTimer > 0 ? `Disable Ephemeral (${activeContact.disappearingTimer}s)` : 'Set 10s Disappearing Timer'}
+                </button>
                 <button onClick={handleExportChat}>
                   <Download size={14} /> Export Transcript (.JSON)
                 </button>

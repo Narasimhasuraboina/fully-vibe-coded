@@ -32,8 +32,8 @@ const BroadcastModal = ({ contacts, onClose, onBroadcastMessage }) => {
   };
 
   return (
-    <div className="modal-backdrop">
-      <div className="cyber-modal">
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="cyber-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">
             <Radio size={16} className="text-accent" />

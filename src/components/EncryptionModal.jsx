@@ -39,16 +39,16 @@ const EncryptionModal = ({ myProfile, contact, onClose }) => {
   };
 
   return (
-    <div className="cyber-modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop cyber-modal-backdrop" onClick={onClose}>
       <div className="cyber-modal encryption-verify-modal" onClick={(e) => e.stopPropagation()}>
         
         {/* Modal Header */}
-        <div className="cyber-modal-header">
+        <div className="modal-header cyber-modal-header">
           <div className="modal-title">
             <ShieldCheck size={18} className="text-accent" />
             <span>END-TO-END ZERO-KNOWLEDGE CIPHER</span>
           </div>
-          <button className="cyber-modal-close" onClick={onClose}>
+          <button className="btn-close cyber-modal-close" onClick={onClose}>
             <X size={18} />
           </button>
         </div>

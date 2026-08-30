@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Shield, 
   Eye, 
@@ -12,7 +12,8 @@ import {
   Tv, 
   Terminal,
   Radio,
-  LogOut
+  LogOut,
+  SlidersHorizontal
 } from 'lucide-react';
 import { THEMES } from '../themes';
 import { soundFX } from '../services/audioService';
@@ -34,6 +35,8 @@ const TopBar = ({
   const [cpuUsage, setCpuUsage] = useState(28);
   const [latency, setLatency] = useState(14);
   const [themeDropdownOpen, setThemeDropdownOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const dropdownRef = useRef(null);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -43,6 +46,22 @@ const TopBar = ({
       setLatency(Math.floor(10 + Math.random() * 8));
     }, 1000);
     return () => clearInterval(timer);
+  }, []);
+
+  // Close menus on click outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setThemeDropdownOpen(false);
+        setMobileMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
   }, []);
 
   const toggleGhostMode = () => {
@@ -72,18 +91,19 @@ const TopBar = ({
   const isGhost = gbSettings.freezeLastSeen && gbSettings.hideOnlineStatus;
 
   return (
-    <header className="topbar">
+    <header className="topbar" ref={dropdownRef}>
       <div className="topbar-left">
         <div className="brand-logo">
           <div className="pulse-indicator active"></div>
           <span className="brand-title">CHATFORGE</span>
-          <span className="brand-badge">GB-CYBER v4.09</span>
+          <span className="brand-badge hide-mobile">GB-CYBER v4.09</span>
         </div>
 
         {/* Realtime P2P Socket Status Tag */}
         <div className={`realtime-status-pill ${isRealtimeConnected ? 'connected' : 'offline'}`} title={isRealtimeConnected ? 'Real-time WebSocket P2P Relay Active' : 'Connecting to Relay Server...'}>
           <Radio size={12} className={isRealtimeConnected ? 'animate-pulse text-accent' : 'text-muted'} />
           <span className="hide-mobile">{isRealtimeConnected ? 'MESH ONLINE' : 'LOCAL STANDBY'}</span>
+          <span className="show-mobile-inline">{isRealtimeConnected ? 'ONLINE' : 'OFFLINE'}</span>
         </div>
 
         <div className="sys-metric hide-mobile">
@@ -123,19 +143,20 @@ const TopBar = ({
           <span className="profile-handle-text">{myProfile?.username}</span>
         </button>
 
+        {/* Desktop-only toggles */}
         {/* Ghost / Stealth Master Switch */}
         <button 
-          className={`cyber-btn btn-ghost-toggle ${isGhost ? 'active' : ''}`}
+          className={`cyber-btn btn-ghost-toggle hide-on-mobile ${isGhost ? 'active' : ''}`}
           onClick={toggleGhostMode}
           title={isGhost ? 'Ghost Mode: ACTIVE (Last seen frozen, Blue ticks hidden)' : 'Ghost Mode: DISABLED'}
         >
           {isGhost ? <EyeOff size={14} /> : <Eye size={14} />}
-          <span className="hide-mobile">{isGhost ? 'GHOST: ON' : 'GHOST: OFF'}</span>
+          <span>{isGhost ? 'GHOST: ON' : 'GHOST: OFF'}</span>
         </button>
 
         {/* Audio FX Toggle */}
         <button 
-          className={`cyber-btn btn-icon ${gbSettings.soundEffects ? 'active' : ''}`}
+          className={`cyber-btn btn-icon hide-on-mobile ${gbSettings.soundEffects ? 'active' : ''}`}
           onClick={toggleAudio}
           title="Toggle Cyber Sound FX"
         >
@@ -144,7 +165,7 @@ const TopBar = ({
 
         {/* CRT Scanline Toggle */}
         <button 
-          className={`cyber-btn btn-icon ${gbSettings.scanlinesEnabled ? 'active' : ''}`}
+          className={`cyber-btn btn-icon hide-on-mobile ${gbSettings.scanlinesEnabled ? 'active' : ''}`}
           onClick={toggleScanlines}
           title="Toggle CRT Scanline Overlay"
         >
@@ -155,7 +176,10 @@ const TopBar = ({
         <div className="theme-selector-wrapper">
           <button 
             className="cyber-btn btn-icon"
-            onClick={() => setThemeDropdownOpen(!themeDropdownOpen)}
+            onClick={() => {
+              setThemeDropdownOpen(!themeDropdownOpen);
+              setMobileMenuOpen(false);
+            }}
             title="Change Cyberpunk Theme"
           >
             <Palette size={15} />
@@ -183,9 +207,9 @@ const TopBar = ({
           )}
         </div>
 
-        {/* App Master Lock */}
+        {/* App Master Lock (Desktop) */}
         <button 
-          className="cyber-btn btn-icon"
+          className="cyber-btn btn-icon hide-on-mobile"
           onClick={() => {
             soundFX.playKeypress();
             onLockApp();
@@ -195,9 +219,9 @@ const TopBar = ({
           <Lock size={15} />
         </button>
 
-        {/* Logout / Switch Operator */}
+        {/* Logout (Desktop) */}
         <button 
-          className="cyber-btn btn-icon"
+          className="cyber-btn btn-icon hide-on-mobile"
           onClick={() => {
             soundFX.playGlitchAlarm();
             onLogout();
@@ -217,8 +241,78 @@ const TopBar = ({
           title="Open Hacker Console & GB-Mods Inspector"
         >
           <Terminal size={15} />
-          <span>CONSOLE & MODS</span>
+          <span className="hide-mobile">CONSOLE & MODS</span>
         </button>
+
+        {/* Mobile Quick Settings & Tools Dropdown Button */}
+        <div className="mobile-tools-wrapper show-on-mobile">
+          <button
+            className={`cyber-btn btn-icon ${mobileMenuOpen ? 'active' : ''}`}
+            onClick={() => {
+              soundFX.playKeypress();
+              setMobileMenuOpen(!mobileMenuOpen);
+              setThemeDropdownOpen(false);
+            }}
+            title="Cyber Tools & Security Settings"
+          >
+            <SlidersHorizontal size={15} />
+          </button>
+
+          {mobileMenuOpen && (
+            <div className="mobile-tools-dropdown">
+              <div className="dropdown-header">CYBER MODS & TOOLS</div>
+              
+              <button 
+                className={`mobile-tool-opt ${isGhost ? 'active' : ''}`}
+                onClick={() => { toggleGhostMode(); }}
+              >
+                {isGhost ? <EyeOff size={14} className="text-danger" /> : <Eye size={14} />}
+                <span>GHOST MODE: {isGhost ? 'ENABLED' : 'OFF'}</span>
+              </button>
+
+              <button 
+                className={`mobile-tool-opt ${gbSettings.soundEffects ? 'active' : ''}`}
+                onClick={() => { toggleAudio(); }}
+              >
+                {gbSettings.soundEffects ? <Volume2 size={14} className="text-accent" /> : <VolumeX size={14} />}
+                <span>CYBER SOUND FX: {gbSettings.soundEffects ? 'ON' : 'MUTED'}</span>
+              </button>
+
+              <button 
+                className={`mobile-tool-opt ${gbSettings.scanlinesEnabled ? 'active' : ''}`}
+                onClick={() => { toggleScanlines(); }}
+              >
+                <Tv size={14} className={gbSettings.scanlinesEnabled ? 'text-accent' : ''} />
+                <span>CRT SCANLINES: {gbSettings.scanlinesEnabled ? 'ON' : 'OFF'}</span>
+              </button>
+
+              <button 
+                className="mobile-tool-opt"
+                onClick={() => {
+                  soundFX.playKeypress();
+                  setMobileMenuOpen(false);
+                  onLockApp();
+                }}
+              >
+                <Lock size={14} />
+                <span>LOCK TERMINAL (PIN)</span>
+              </button>
+
+              <button 
+                className="mobile-tool-opt text-danger"
+                onClick={() => {
+                  soundFX.playGlitchAlarm();
+                  setMobileMenuOpen(false);
+                  onLogout();
+                }}
+              >
+                <LogOut size={14} className="text-danger" />
+                <span>LOGOUT / EXIT OPERATOR</span>
+              </button>
+            </div>
+          )}
+        </div>
+
       </div>
     </header>
   );
