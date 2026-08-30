@@ -66,35 +66,50 @@ function createMessageObject(payload, isUser = true, hideSecondTick = false) {
 
 function App() {
   // Current User Identity (Login Required)
-  const [myProfile, setMyProfile] = useState(() => loadState('my_profile', null));
+  const [myProfile, setMyProfile] = useState(() => {
+    const p = loadState('my_profile', null);
+    if (p && p.username) {
+      return {
+        ...p,
+        tag: p.tag || `@${p.username}`,
+      };
+    }
+    return null;
+  });
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [serverInfo, setServerInfo] = useState(null);
 
   // User-scoped account key
-  const userKey = myProfile?.tag ? myProfile.tag.toLowerCase().replace(/^@/, '') : null;
+  const userKey = (myProfile?.tag || myProfile?.username || '').toLowerCase().replace(/^@/, '');
 
-  // State Initialization (Scoped to active user account)
+  // State Initialization (Scoped to active user account with robust fallbacks)
   const [contacts, setContacts] = useState(() => {
-    const raw = userKey ? loadState(`contacts_${userKey}`, INITIAL_CONTACTS) : [];
-    return raw || [];
+    const raw = userKey ? loadState(`contacts_${userKey}`, INITIAL_CONTACTS) : INITIAL_CONTACTS;
+    return Array.isArray(raw) ? raw : INITIAL_CONTACTS;
   });
   const [messages, setMessages] = useState(() => {
-    const raw = userKey ? loadState(`messages_${userKey}`, INITIAL_MESSAGES) : {};
-    return raw || {};
+    const raw = userKey ? loadState(`messages_${userKey}`, INITIAL_MESSAGES) : INITIAL_MESSAGES;
+    return (raw && typeof raw === 'object') ? raw : INITIAL_MESSAGES;
   });
-  const [stories, setStories] = useState(() => loadState('stories', INITIAL_STORIES));
-  const [autoReplies, setAutoReplies] = useState(() => loadState('auto_replies', INITIAL_AUTO_REPLIES));
-  const [scheduledMessages, setScheduledMessages] = useState(() => loadState('scheduled', INITIAL_SCHEDULED));
-  const [gbSettings, setGbSettings] = useState(() => loadState('gb_settings', DEFAULT_GB_SETTINGS));
-  const [theme, setTheme] = useState(() => gbSettings.theme || 'matrix');
+  const [stories, setStories] = useState(() => loadState('stories', INITIAL_STORIES) || INITIAL_STORIES);
+  const [autoReplies, setAutoReplies] = useState(() => loadState('auto_replies', INITIAL_AUTO_REPLIES) || INITIAL_AUTO_REPLIES);
+  const [scheduledMessages, setScheduledMessages] = useState(() => loadState('scheduled', INITIAL_SCHEDULED) || INITIAL_SCHEDULED);
+  const [gbSettings, setGbSettings] = useState(() => {
+    const s = loadState('gb_settings', DEFAULT_GB_SETTINGS);
+    return s ? { ...DEFAULT_GB_SETTINGS, ...s } : DEFAULT_GB_SETTINGS;
+  });
+  const [theme, setTheme] = useState(() => {
+    const s = loadState('gb_settings', DEFAULT_GB_SETTINGS);
+    return s?.theme || 'matrix';
+  });
 
   // Active Context State (Mobile starts at contact list if screen is small)
   const [activeContactId, setActiveContactId] = useState(() => {
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
       return null;
     }
-    const savedContacts = userKey ? loadState(`contacts_${userKey}`, INITIAL_CONTACTS) : [];
-    return savedContacts[0]?.id || null;
+    const savedContacts = userKey ? loadState(`contacts_${userKey}`, INITIAL_CONTACTS) : INITIAL_CONTACTS;
+    return (Array.isArray(savedContacts) && savedContacts[0]?.id) || null;
   });
   const [typingStatus, setTypingStatus] = useState({}); // { [contactId]: boolean }
 
