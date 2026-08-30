@@ -152,9 +152,16 @@ app.get('/api/info', (req, res) => {
   });
 });
 
+// Helper to normalize any username / tag to standard @lowercase
+function normalizeTag(input) {
+  if (!input || typeof input !== 'string') return '';
+  const clean = input.trim().replace(/^@/, '').toLowerCase();
+  return clean ? `@${clean}` : '';
+}
+
 // Deliver all stored encrypted mailbox messages when a peer comes online
 function deliverPendingMailboxMessages(targetTag, targetSocket) {
-  const cleanTag = targetTag?.toLowerCase();
+  const cleanTag = normalizeTag(targetTag);
   const pending = offlineMailbox.get(cleanTag) || [];
 
   if (pending.length > 0) {
@@ -169,10 +176,10 @@ function deliverPendingMailboxMessages(targetTag, targetSocket) {
       });
 
       // If the sender is online, send delivery confirmation
-      const sender = registeredUsers.get(item.senderInfo?.tag?.toLowerCase());
+      const sender = registeredUsers.get(normalizeTag(item.senderInfo?.tag));
       if (sender && sender.socketId) {
         io.to(sender.socketId).emit('message_delivered_ack', {
-          messageId: item.message.id,
+          messageId: item.message?.id,
           recipientTag: cleanTag,
           status: 'delivered',
         });
@@ -352,11 +359,11 @@ io.on('connection', (socket) => {
 
   // 3. Relay Message Protocol with Store-and-Forward Encrypted Mailbox
   socket.on('send_message', (payload) => {
-    const sender = socket.userTag ? registeredUsers.get(socket.userTag) : null;
+    const sender = socket.userTag ? registeredUsers.get(normalizeTag(socket.userTag)) : null;
     if (!sender) return;
 
     const { recipientTag, message } = payload;
-    const cleanRecipientTag = recipientTag?.toLowerCase();
+    const cleanRecipientTag = normalizeTag(recipientTag);
     const recipient = registeredUsers.get(cleanRecipientTag);
 
     if (recipient && recipient.status === 'online' && recipient.socketId) {
@@ -368,7 +375,7 @@ io.on('connection', (socket) => {
 
       // Confirm delivered to sender
       socket.emit('message_delivered_ack', {
-        messageId: message.id,
+        messageId: message?.id,
         recipientTag: cleanRecipientTag,
         status: 'delivered',
       });
@@ -381,22 +388,22 @@ io.on('connection', (socket) => {
         queuedAt: Date.now(),
       };
       
-      const filtered = currentQueue.filter(item => item.message?.id !== message.id);
+      const filtered = currentQueue.filter(item => item.message?.id !== message?.id);
       filtered.push(entry);
       offlineMailbox.set(cleanRecipientTag, filtered);
       saveMailboxDatabase();
 
-      console.log(`[MAILBOX] Message ${message.id} from ${sender.tag} stored in encrypted mailbox for ${cleanRecipientTag} (Queue: ${filtered.length})`);
+      console.log(`[MAILBOX] Message ${message?.id} from ${sender.tag} stored in encrypted mailbox for ${cleanRecipientTag} (Queue: ${filtered.length})`);
 
       // Acknowledge to sender that server mailbox accepted the packet
       socket.emit('message_queued_server_ack', {
-        messageId: message.id,
+        messageId: message?.id,
         recipientTag: cleanRecipientTag,
         queueCount: filtered.length,
       });
 
       socket.emit('peer_offline_ack', {
-        messageId: message.id,
+        messageId: message?.id,
         recipientTag: cleanRecipientTag,
         reason: 'SAVED_IN_SERVER_MAILBOX_WILL_DELIVER_ON_LOGIN',
       });
@@ -405,8 +412,8 @@ io.on('connection', (socket) => {
 
   // 4. Burn-After-Read (View-Once) Protocol
   socket.on('message_viewed', ({ messageId, senderTag, burnDelay = 5 }) => {
-    const sender = registeredUsers.get(senderTag?.toLowerCase());
-    const viewer = socket.userTag ? registeredUsers.get(socket.userTag) : null;
+    const sender = registeredUsers.get(normalizeTag(senderTag));
+    const viewer = socket.userTag ? registeredUsers.get(normalizeTag(socket.userTag)) : null;
 
     if (sender && sender.socketId) {
       io.to(sender.socketId).emit('message_viewed_by_peer', {
@@ -419,7 +426,7 @@ io.on('connection', (socket) => {
 
   // 5. Message Shred Confirmation
   socket.on('message_shredded', ({ messageId, targetTag }) => {
-    const target = registeredUsers.get(targetTag?.toLowerCase());
+    const target = registeredUsers.get(normalizeTag(targetTag));
     if (target && target.socketId) {
       io.to(target.socketId).emit('message_shredded_ack', { messageId });
     }
@@ -427,10 +434,10 @@ io.on('connection', (socket) => {
 
   // 6. Real-Time Typing Indicator
   socket.on('typing_indicator', ({ recipientTag, isTyping }) => {
-    const sender = socket.userTag ? registeredUsers.get(socket.userTag) : null;
+    const sender = socket.userTag ? registeredUsers.get(normalizeTag(socket.userTag)) : null;
     if (!sender) return;
 
-    const recipient = registeredUsers.get(recipientTag?.toLowerCase());
+    const recipient = registeredUsers.get(normalizeTag(recipientTag));
     if (recipient && recipient.socketId) {
       io.to(recipient.socketId).emit('peer_typing', {
         senderTag: sender.tag,
@@ -441,8 +448,8 @@ io.on('connection', (socket) => {
 
   // 7. WebRTC Audio / Video Call Signaling
   socket.on('call_offer', (data) => {
-    const sender = socket.userTag ? registeredUsers.get(socket.userTag) : null;
-    const target = registeredUsers.get(data.targetTag?.toLowerCase());
+    const sender = socket.userTag ? registeredUsers.get(normalizeTag(socket.userTag)) : null;
+    const target = registeredUsers.get(normalizeTag(data.targetTag));
     if (target && target.socketId) {
       io.to(target.socketId).emit('incoming_call_signal', {
         callerInfo: sanitizeUser(sender),
@@ -455,7 +462,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('call_answer', (data) => {
-    const caller = registeredUsers.get(data.callerTag?.toLowerCase());
+    const caller = registeredUsers.get(normalizeTag(data.callerTag));
     if (caller && caller.socketId) {
       io.to(caller.socketId).emit('call_answered_signal', {
         answer: data.answer,
@@ -464,7 +471,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('ice_candidate', (data) => {
-    const target = registeredUsers.get(data.targetTag?.toLowerCase());
+    const target = registeredUsers.get(normalizeTag(data.targetTag));
     if (target && target.socketId) {
       io.to(target.socketId).emit('ice_candidate_signal', {
         candidate: data.candidate,
@@ -474,7 +481,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('call_reject', (data) => {
-    const caller = registeredUsers.get(data.callerTag?.toLowerCase());
+    const caller = registeredUsers.get(normalizeTag(data.callerTag));
     if (caller && caller.socketId) {
       io.to(caller.socketId).emit('call_rejected_signal', {
         reason: data.reason || 'CALL_DECLINED_BY_PEER',
@@ -483,7 +490,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('call_end', (data) => {
-    const target = registeredUsers.get(data.targetTag?.toLowerCase());
+    const target = registeredUsers.get(normalizeTag(data.targetTag));
     if (target && target.socketId) {
       io.to(target.socketId).emit('call_ended_signal');
     }

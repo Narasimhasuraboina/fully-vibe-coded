@@ -264,10 +264,11 @@ class RealtimeSocketService {
 
   saveToOutbox(recipientTag, message) {
     try {
+      const cleanTag = (recipientTag || '').toLowerCase().trim();
       const outbox = this.getOutbox();
       const entry = {
         id: message.id,
-        recipientTag,
+        recipientTag: cleanTag,
         message,
         savedAt: Date.now(),
       };
@@ -275,7 +276,7 @@ class RealtimeSocketService {
       const filtered = outbox.filter(item => item.id !== message.id);
       filtered.push(entry);
       localStorage.setItem('chatforge_offline_outbox', JSON.stringify(filtered));
-      console.log(`[OUTBOX] Message ${message.id} queued in sender local storage for offline peer ${recipientTag}`);
+      console.log(`[OUTBOX] Message ${message.id} queued in sender local storage for offline peer ${cleanTag}`);
     } catch (e) {
       console.error('[OUTBOX] Error saving to outbox', e);
     }
@@ -293,11 +294,12 @@ class RealtimeSocketService {
 
   // Flush Outbox when recipient comes online
   flushOutboxForPeer(peerTag, onDispatchCallback) {
+    const cleanPeerTag = (peerTag || '').toLowerCase().trim();
     const outbox = this.getOutbox();
-    const pendingForPeer = outbox.filter(item => item.recipientTag === peerTag);
+    const pendingForPeer = outbox.filter(item => (item.recipientTag || '').toLowerCase().trim() === cleanPeerTag);
 
     if (pendingForPeer.length > 0) {
-      console.log(`[OUTBOX FLUSH] Peer ${peerTag} is now ONLINE! Flushing ${pendingForPeer.length} queued messages...`);
+      console.log(`[OUTBOX FLUSH] Peer ${cleanPeerTag} is now ONLINE! Flushing ${pendingForPeer.length} queued messages...`);
       pendingForPeer.forEach((item) => {
         // Send to peer now
         this.sendMessage(item.recipientTag, item.message);

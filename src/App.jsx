@@ -194,16 +194,22 @@ function App() {
     const { message, senderInfo } = payload;
     soundFX.playReceived();
 
-    // Check if sender exists in contacts, otherwise automatically add to contact list!
-    let senderContact = contactsRef.current.find((c) => c.tag === senderInfo.tag || c.name === senderInfo.username);
+    const cleanSenderTag = senderInfo?.tag?.toLowerCase()?.trim() || '';
+    const cleanSenderUser = senderInfo?.username?.toLowerCase()?.trim() || '';
+
+    // Check if sender exists in contacts (case-insensitive match)
+    let senderContact = contactsRef.current.find((c) => 
+      (c.tag && c.tag.toLowerCase().trim() === cleanSenderTag) || 
+      (c.name && c.name.toLowerCase().trim() === cleanSenderUser)
+    );
     let targetContactId = senderContact?.id;
 
     if (!senderContact) {
-      targetContactId = `peer_${Date.now()}`;
+      targetContactId = `peer_${cleanSenderUser || Date.now()}`;
       senderContact = {
         id: targetContactId,
         name: senderInfo.username,
-        tag: senderInfo.tag,
+        tag: senderInfo.tag || `@${cleanSenderUser}`,
         avatar: senderInfo.avatar,
         status: 'online',
         lastSeen: 'online',
@@ -217,13 +223,43 @@ function App() {
         bio: 'Real-time connected client device on mesh relay.',
       };
       setContacts((prev) => [senderContact, ...prev]);
-    } else {
-      // Increment unread count if not currently looking at this active chat
-      if (activeContactRef.current !== senderContact.id) {
-        setContacts((prev) =>
-          prev.map((c) => (c.id === senderContact.id ? { ...c, unreadCount: (c.unreadCount || 0) + 1, status: 'online' } : c))
-        );
+      if (!activeContactRef.current) {
+        setActiveContactId(targetContactId);
       }
+    } else {
+      // Mark contact online and increment unread count if not currently looking at this active chat
+      const isCurrentlyViewing = activeContactRef.current === senderContact.id;
+      setContacts((prev) =>
+        prev.map((c) =>
+          c.id === senderContact.id
+            ? {
+                ...c,
+                status: 'online',
+                lastSeen: 'online',
+                avatar: senderInfo.avatar || c.avatar,
+                unreadCount: isCurrentlyViewing ? 0 : (c.unreadCount || 0) + 1,
+              }
+            : c
+        )
+      );
+    }
+
+    const isCurrentlyViewing = activeContactRef.current === targetContactId;
+    const incomingMsg = {
+      ...message,
+      sender: targetContactId,
+      status: 'read',
+      burnCountdown: isCurrentlyViewing && message.burnAfterRead ? 5 : null,
+    };
+
+    setMessages((prev) => ({
+      ...prev,
+      [targetContactId]: [...(prev[targetContactId] || []), incomingMsg],
+    }));
+
+    // Auto-view signal if recipient is actively reading this chat
+    if (isCurrentlyViewing && message.burnAfterRead) {
+      socketService.emitMessageViewed(message.id, senderInfo.tag, 5);
     }
 
     // Push Desktop & HUD Toast Notification
@@ -238,34 +274,12 @@ function App() {
       message: payloadSnippet,
       avatar: senderInfo.avatar,
       type: 'info',
-      actionLabel: 'OPEN CHAT',
-      onAction: () => handleSelectContact(senderContact),
     });
 
-    notificationService.showDesktopNotification(`Chatforge: ${senderInfo.username}`, {
+    notificationService.showDesktopNotification(`Signal from ${senderInfo.username}`, {
       body: payloadSnippet,
       icon: senderInfo.avatar || '/favicon.svg',
     });
-
-    // Prepare incoming message with Burn-After-Read (View-Once) countdown if active
-    const isCurrentlyViewing = activeContactRef.current === targetContactId;
-    const incomingMsg = {
-      ...message,
-      sender: targetContactId,
-      status: 'read',
-      // If currently viewing, trigger 5s burn countdown immediately
-      burnCountdown: isCurrentlyViewing && message.burnAfterRead ? 5 : null,
-    };
-
-    setMessages((prev) => ({
-      ...prev,
-      [targetContactId]: [...(prev[targetContactId] || []), incomingMsg],
-    }));
-
-    // If viewing right now, notify sender that message has been viewed
-    if (isCurrentlyViewing && message.burnAfterRead) {
-      socketService.emitMessageViewed(message.id, senderInfo.tag, 5);
-    }
   }, []);
 
   // Initialize Real-Time Socket Connection when user logs in
@@ -296,26 +310,33 @@ function App() {
         });
       },
 
+
+
+
+
       // When peer comes online -> update status & flush outbox
       onPeerOnline: (peer) => {
         soundFX.playKeypress();
+        const peerTag = peer.tag?.toLowerCase()?.trim();
         setContacts((prev) =>
-          prev.map((c) => (c.tag === peer.tag ? { ...c, status: 'online', lastSeen: 'online' } : c))
+          prev.map((c) => (c.tag?.toLowerCase()?.trim() === peerTag ? { ...c, status: 'online', lastSeen: 'online', avatar: peer.avatar || c.avatar } : c))
         );
       },
 
       // When peer goes offline
       onPeerOffline: (data) => {
+        const peerTag = data.tag?.toLowerCase()?.trim();
         setContacts((prev) =>
-          prev.map((c) => (c.tag === data.tag ? { ...c, status: 'offline', lastSeen: data.lastSeen } : c))
+          prev.map((c) => (c.tag?.toLowerCase()?.trim() === peerTag ? { ...c, status: 'offline', lastSeen: data.lastSeen } : c))
         );
       },
 
       onReceiveMessage: handleIncomingSocketMessage,
 
       onMessageDelivered: ({ messageId, recipientTag }) => {
+        const cleanTag = recipientTag?.toLowerCase()?.trim();
         setMessages((prev) => {
-          const target = contactsRef.current.find((c) => c.tag === recipientTag);
+          const target = contactsRef.current.find((c) => c.tag?.toLowerCase()?.trim() === cleanTag);
           if (!target || !prev[target.id]) return prev;
           const updated = prev[target.id].map((m) =>
             m.id === messageId ? { ...m, status: 'delivered', isOutboxPending: false, isQueuedInServerMailbox: false } : m
@@ -326,8 +347,9 @@ function App() {
 
       // Message securely deposited in Server Store-and-Forward Mailbox
       onMessageQueuedInServerMailbox: ({ messageId, recipientTag }) => {
+        const cleanTag = recipientTag?.toLowerCase()?.trim();
         setMessages((prev) => {
-          const target = contactsRef.current.find((c) => c.tag === recipientTag);
+          const target = contactsRef.current.find((c) => c.tag?.toLowerCase()?.trim() === cleanTag);
           if (!target || !prev[target.id]) return prev;
           const updated = prev[target.id].map((m) =>
             m.id === messageId ? { ...m, isQueuedInServerMailbox: true, isOutboxPending: false, status: 'queued_server' } : m
@@ -346,10 +368,11 @@ function App() {
         });
       },
 
-      // When peer was offline, message saved in sender outbox
+      // When peer was offline, message saved in sender outbox / server mailbox
       onPeerOfflineAck: ({ messageId, recipientTag }) => {
+        const cleanTag = recipientTag?.toLowerCase()?.trim();
         setMessages((prev) => {
-          const target = contactsRef.current.find((c) => c.tag === recipientTag);
+          const target = contactsRef.current.find((c) => c.tag?.toLowerCase()?.trim() === cleanTag);
           if (!target || !prev[target.id]) return prev;
           const updated = prev[target.id].map((m) =>
             m.id === messageId ? { ...m, isQueuedInServerMailbox: true, isOutboxPending: false } : m
@@ -360,8 +383,9 @@ function App() {
 
       // Peer viewed message -> start burn countdown on sender side too!
       onMessageViewedByPeer: ({ messageId, viewerTag, burnDelay }) => {
+        const cleanTag = viewerTag?.toLowerCase()?.trim();
         setMessages((prev) => {
-          const target = contactsRef.current.find((c) => c.tag === viewerTag);
+          const target = contactsRef.current.find((c) => c.tag?.toLowerCase()?.trim() === cleanTag);
           if (!target || !prev[target.id]) return prev;
           const updated = prev[target.id].map((m) =>
             m.id === messageId ? { ...m, status: 'read', burnCountdown: burnDelay || 5 } : m
@@ -381,7 +405,8 @@ function App() {
       },
 
       onPeerTyping: ({ senderTag, isTyping }) => {
-        const contact = contactsRef.current.find((c) => c.tag === senderTag);
+        const cleanTag = senderTag?.toLowerCase()?.trim();
+        const contact = contactsRef.current.find((c) => c.tag?.toLowerCase()?.trim() === cleanTag);
         if (contact) {
           setTypingStatus((prev) => ({ ...prev, [contact.id]: isTyping }));
         }
@@ -397,8 +422,9 @@ function App() {
       },
 
       onOutboxMessageDispatched: (peerTag, msg) => {
+        const cleanTag = peerTag?.toLowerCase()?.trim();
         setMessages((prev) => {
-          const target = contactsRef.current.find((c) => c.tag === peerTag);
+          const target = contactsRef.current.find((c) => c.tag?.toLowerCase()?.trim() === cleanTag);
           if (!target || !prev[target.id]) return prev;
           const updated = prev[target.id].map((m) =>
             m.id === msg.id ? { ...m, isOutboxPending: false, status: 'delivered' } : m
@@ -411,7 +437,8 @@ function App() {
 
   // Add / Start Chat with Discovered User
   const handleSelectAndAddContact = (userContact) => {
-    const existing = contacts.find(c => c.tag === userContact.tag);
+    const cleanTag = userContact.tag?.toLowerCase()?.trim();
+    const existing = contacts.find(c => c.tag?.toLowerCase()?.trim() === cleanTag);
     if (existing) {
       handleSelectContact(existing);
       return;
@@ -426,9 +453,8 @@ function App() {
     const targetContact = contacts.find((c) => c.id === targetId);
     if (!targetContact) return;
 
-    const isPeerOnline = targetContact.status === 'online';
     const newMsg = createMessageObject(
-      { ...messagePayload, isOutboxPending: !isPeerOnline },
+      messagePayload,
       true,
       gbSettings.hideSecondTick
     );
@@ -439,13 +465,11 @@ function App() {
       [targetId]: [...(prev[targetId] || []), newMsg],
     }));
 
-    // 2. Dispatch via Real-time Socket
-    if (isPeerOnline) {
-      socketService.sendMessage(targetContact.tag, newMsg);
-    } else {
-      // Peer is offline -> Queue in sender's local storage outbox
+    // 2. Dispatch via Real-time Socket (Always attempt real-time transmission)
+    const sent = socketService.sendMessage(targetContact.tag, newMsg);
+    if (!sent) {
+      // Local client itself is disconnected / offline
       socketService.saveToOutbox(targetContact.tag, newMsg);
-      console.log(`[OFFLINE QUEUE] Target ${targetContact.name} is offline. Message saved in your local outbox.`);
     }
 
     // 3. Reset unread count for target
