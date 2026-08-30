@@ -98,22 +98,6 @@ function App() {
   });
   const [typingStatus, setTypingStatus] = useState({}); // { [contactId]: boolean }
 
-  // Switch account data cleanly when logged-in profile changes
-  useEffect(() => {
-    if (myProfile?.tag) {
-      const uKey = myProfile.tag.toLowerCase().replace(/^@/, '');
-      const userContacts = loadState(`contacts_${uKey}`, INITIAL_CONTACTS) || [];
-      const userMessages = loadState(`messages_${uKey}`, INITIAL_MESSAGES) || {};
-      setContacts(userContacts);
-      setMessages(userMessages);
-      setActiveContactId(userContacts[0]?.id || null);
-    } else {
-      setContacts([]);
-      setMessages({});
-      setActiveContactId(null);
-    }
-  }, [myProfile?.tag]);
-
   // Modals & Panels
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
   const [isAppLocked, setIsAppLocked] = useState(false);
@@ -859,12 +843,36 @@ function App() {
     setIncomingCallAlert(null);
   };
 
+  // Handle explicit Login from LoginScreen
+  const handleLogin = (prof) => {
+    setMyProfile(prof);
+    const uKey = prof.tag ? prof.tag.toLowerCase().replace(/^@/, '') : 'guest';
+    const userContacts = loadState(`contacts_${uKey}`, INITIAL_CONTACTS) || [];
+    const userMessages = loadState(`messages_${uKey}`, INITIAL_MESSAGES) || {};
+    setContacts(userContacts);
+    setMessages(userMessages);
+    setActiveContactId(userContacts[0]?.id || null);
+  };
+
+  // Manual Mesh Sync & App Reload
+  const handleRefreshApp = () => {
+    if (socketService.socket) {
+      socketService.socket.disconnect();
+      socketService.connect(myProfile);
+    }
+    notificationService.pushToast({
+      title: 'MESH RELAY SYNCED',
+      message: 'Reconnected to signal server & checked offline mailbox.',
+      type: 'info',
+    });
+  };
+
   // IF USER IS NOT LOGGED IN -> RENDER TERMINAL LOGIN GATEWAY FIRST!
   if (!myProfile) {
     return (
       <div className={`chatforge-app-root ${gbSettings.scanlinesEnabled ? 'crt-scanlines' : ''}`}>
         <MatrixBackground enabled={true} color={THEMES[theme]?.accent || '#00ff66'} />
-        <LoginScreen onLogin={(prof) => setMyProfile(prof)} serverInfo={serverInfo} />
+        <LoginScreen onLogin={(prof) => handleLogin(prof)} serverInfo={serverInfo} />
       </div>
     );
   }
@@ -890,6 +898,7 @@ function App() {
         myProfile={myProfile}
         onOpenProfile={() => setShowProfileModal(true)}
         onLogout={handleLogout}
+        onRefresh={handleRefreshApp}
         isRealtimeConnected={isRealtimeConnected}
       />
 

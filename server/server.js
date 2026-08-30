@@ -35,6 +35,10 @@ const registeredUsers = new Map();
 // recipientTag -> [ { message, senderInfo, queuedAt } ]
 const offlineMailbox = new Map();
 
+// Map of in-flight WebRTC ICE candidate queues:
+// targetTag -> [ { candidate, fromTag, fromSocketId } ]
+const callCandidateBuffer = new Map();
+
 // Helper to hash password with quantum salt
 function hashPassword(password, salt = 'chatforge_quantum_salt_v1') {
   return crypto.createHash('sha256').update(password + salt).digest('hex');
@@ -509,11 +513,14 @@ io.on('connection', (socket) => {
     });
   });
 
-  // 7. WebRTC Audio / Video Call Signaling (Multi-device targeted)
+  // 7. WebRTC Audio / Video Call Signaling (Multi-device targeted with ICE Candidate Buffer)
   socket.on('call_offer', (data) => {
     const sender = socket.userTag ? registeredUsers.get(normalizeTag(socket.userTag)) : null;
     const cleanTargetTag = normalizeTag(data.targetTag);
     const targetRoom = io.sockets.adapter.rooms.get(cleanTargetTag);
+
+    // Clear stale candidate buffer for target
+    callCandidateBuffer.delete(cleanTargetTag);
 
     if (targetRoom && targetRoom.size > 0) {
       io.to(cleanTargetTag).emit('incoming_call_signal', {
@@ -529,17 +536,33 @@ io.on('connection', (socket) => {
 
   socket.on('call_answer', (data) => {
     const cleanCallerTag = normalizeTag(data.callerTag);
+    const answeringSocketId = socket.id;
+
     if (data.callerSocketId) {
       io.to(data.callerSocketId).emit('call_answered_signal', {
         answer: data.answer,
-        answerSocketId: socket.id,
+        answerSocketId: answeringSocketId,
       });
     } else {
       io.to(cleanCallerTag).emit('call_answered_signal', {
         answer: data.answer,
-        answerSocketId: socket.id,
+        answerSocketId: answeringSocketId,
       });
     }
+
+    // Flush any early buffered ICE candidates to this answering receiver socket!
+    if (socket.userTag) {
+      const userTag = normalizeTag(socket.userTag);
+      const buffered = callCandidateBuffer.get(userTag) || [];
+      if (buffered.length > 0) {
+        console.log(`[WEBRTC] Flushing ${buffered.length} buffered ICE candidates to answering socket ${answeringSocketId}`);
+        buffered.forEach((candData) => {
+          socket.emit('ice_candidate_signal', candData);
+        });
+        callCandidateBuffer.delete(userTag);
+      }
+    }
+
     // Cancel call alert on callee's other devices
     if (socket.userTag) {
       socket.to(normalizeTag(socket.userTag)).emit('call_answered_elsewhere');
@@ -548,23 +571,29 @@ io.on('connection', (socket) => {
 
   socket.on('ice_candidate', (data) => {
     const cleanTargetTag = normalizeTag(data.targetTag);
+    const candPayload = {
+      candidate: data.candidate,
+      fromTag: socket.userTag,
+      fromSocketId: socket.id,
+    };
+
+    // Buffer candidate in case callee has not mounted CallModal yet
+    const currentBuf = callCandidateBuffer.get(cleanTargetTag) || [];
+    currentBuf.push(candPayload);
+    callCandidateBuffer.set(cleanTargetTag, currentBuf);
+
     if (data.targetSocketId) {
-      io.to(data.targetSocketId).emit('ice_candidate_signal', {
-        candidate: data.candidate,
-        fromTag: socket.userTag,
-        fromSocketId: socket.id,
-      });
+      io.to(data.targetSocketId).emit('ice_candidate_signal', candPayload);
     } else {
-      io.to(cleanTargetTag).emit('ice_candidate_signal', {
-        candidate: data.candidate,
-        fromTag: socket.userTag,
-        fromSocketId: socket.id,
-      });
+      io.to(cleanTargetTag).emit('ice_candidate_signal', candPayload);
     }
   });
 
   socket.on('call_reject', (data) => {
     const cleanCallerTag = normalizeTag(data.callerTag);
+    callCandidateBuffer.delete(cleanCallerTag);
+    if (socket.userTag) callCandidateBuffer.delete(normalizeTag(socket.userTag));
+
     if (data.callerSocketId) {
       io.to(data.callerSocketId).emit('call_rejected_signal', {
         reason: data.reason || 'CALL_DECLINED_BY_PEER',
@@ -578,6 +607,9 @@ io.on('connection', (socket) => {
 
   socket.on('call_end', (data) => {
     const cleanTargetTag = normalizeTag(data.targetTag);
+    callCandidateBuffer.delete(cleanTargetTag);
+    if (socket.userTag) callCandidateBuffer.delete(normalizeTag(socket.userTag));
+
     io.to(cleanTargetTag).emit('call_ended_signal');
     if (socket.userTag) {
       socket.to(normalizeTag(socket.userTag)).emit('call_ended_signal');

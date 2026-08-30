@@ -65,6 +65,7 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
   const animFrameRef = useRef(null);
   const modalContainerRef = useRef(null);
   const iceCandidateQueueRef = useRef([]);
+  const localIceCandidatesRef = useRef([]);
   const isRemoteDescSetRef = useRef(false);
 
   // Initialize Web Audio Frequency Analyser for real-time live microphone spectrum
@@ -274,6 +275,7 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
         // ICE candidate handler
         pc.onicecandidate = (event) => {
           if (event.candidate && contact?.tag) {
+            localIceCandidatesRef.current.push(event.candidate);
             socketService.emitIceCandidate(contact.tag, event.candidate, callerSocketId);
           }
         };
@@ -282,7 +284,6 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
           console.log('[WEBRTC] Connection State:', pc.connectionState);
           if (pc.connectionState === 'connected') {
             setCallStatus('CONNECTED // AES-256 QUANTUM LINK');
-            soundFX.playBeep(880, 'sine', 0.15);
           } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
             setCallStatus('RECONNECTING SIGNAL...');
             try {
@@ -333,7 +334,14 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
           }
         }
 
-        if (isCancelled) return;
+        if (isCancelled) {
+          if (stream) {
+            stream.getTracks().forEach((t) => {
+              try { t.stop(); t.enabled = false; } catch {}
+            });
+          }
+          return;
+        }
 
         if (stream) {
           localStreamRef.current = stream;
@@ -364,7 +372,6 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
           const offer = await pc.createOffer(offerOptions);
           await pc.setLocalDescription(offer);
           socketService.emitCallOffer(contact.tag, callType, offer);
-          soundFX.playRing();
         }
 
       } catch (err) {
@@ -384,6 +391,12 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
             isRemoteDescSetRef.current = true;
             await drainIceCandidateQueue();
             setCallStatus('CONNECTED // AES-256 QUANTUM LINK');
+
+            // Re-transmit all local ICE candidates to the answering receiver socket
+            const targetSock = data.answerSocketId || callerSocketId;
+            localIceCandidatesRef.current.forEach((cand) => {
+              socketService.emitIceCandidate(contact.tag, cand, targetSock);
+            });
           } catch (e) {
             console.warn('[WEBRTC] setRemoteDescription error:', e);
           }
