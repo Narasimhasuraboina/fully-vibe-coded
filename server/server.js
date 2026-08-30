@@ -418,6 +418,12 @@ io.on('connection', (socket) => {
         senderInfo: sanitizeUser(sender),
       });
 
+      // SYNC SENT MESSAGE TO SENDER'S OTHER LOGGED-IN DEVICES!
+      socket.to(senderTag).emit('sync_sent_message', {
+        recipientTag: cleanRecipientTag,
+        message,
+      });
+
       // Confirm delivered to sender
       socket.emit('message_delivered_ack', {
         messageId: message?.id,
@@ -425,7 +431,7 @@ io.on('connection', (socket) => {
         status: 'delivered',
       });
 
-      console.log(`[DELIVERY LIVE] Message ${message?.id} from ${sender.tag} -> ${cleanRecipientTag} delivered live.`);
+      console.log(`[DELIVERY LIVE] Message ${message?.id} from ${sender.tag} -> ${cleanRecipientTag} delivered live (and synced to sender's other devices).`);
     } else {
       // Recipient is OFFLINE -> Deposit in Zero-Knowledge Store-and-Forward Server Mailbox!
       const currentQueue = offlineMailbox.get(cleanRecipientTag) || [];
@@ -442,6 +448,12 @@ io.on('connection', (socket) => {
 
       console.log(`[MAILBOX] Message ${message?.id} from ${sender.tag} stored in encrypted mailbox for ${cleanRecipientTag} (Queue: ${filtered.length})`);
 
+      // SYNC SENT MESSAGE TO SENDER'S OTHER LOGGED-IN DEVICES EVEN IF RECIPIENT IS OFFLINE!
+      socket.to(senderTag).emit('sync_sent_message', {
+        recipientTag: cleanRecipientTag,
+        message,
+      });
+
       // Acknowledge to sender that server mailbox accepted the packet
       socket.emit('message_queued_server_ack', {
         messageId: message?.id,
@@ -457,7 +469,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 4. Burn-After-Read (View-Once) Protocol
+  // 4. Burn-After-Read (View-Once) Protocol (Synced across all active peer devices)
   socket.on('message_viewed', ({ messageId, senderTag, burnDelay = 5 }) => {
     const cleanSenderTag = normalizeTag(senderTag);
     const viewer = socket.userTag ? registeredUsers.get(normalizeTag(socket.userTag)) : null;
@@ -467,12 +479,22 @@ io.on('connection', (socket) => {
       viewerTag: viewer?.tag,
       burnDelay,
     });
+    if (socket.userTag) {
+      socket.to(normalizeTag(socket.userTag)).emit('message_viewed_by_peer', {
+        messageId,
+        viewerTag: viewer?.tag,
+        burnDelay,
+      });
+    }
   });
 
   // 5. Message Shred Confirmation
   socket.on('message_shredded', ({ messageId, targetTag }) => {
     const cleanTargetTag = normalizeTag(targetTag);
     io.to(cleanTargetTag).emit('message_shredded_ack', { messageId });
+    if (socket.userTag) {
+      socket.to(normalizeTag(socket.userTag)).emit('message_shredded_ack', { messageId });
+    }
   });
 
   // 6. Real-Time Typing Indicator
@@ -487,7 +509,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  // 7. WebRTC Audio / Video Call Signaling
+  // 7. WebRTC Audio / Video Call Signaling (Multi-device targeted)
   socket.on('call_offer', (data) => {
     const sender = socket.userTag ? registeredUsers.get(normalizeTag(socket.userTag)) : null;
     const cleanTargetTag = normalizeTag(data.targetTag);
@@ -495,40 +517,71 @@ io.on('connection', (socket) => {
 
     if (targetRoom && targetRoom.size > 0) {
       io.to(cleanTargetTag).emit('incoming_call_signal', {
-        callerInfo: sanitizeUser(sender),
+        callerInfo: sanitizeUser(sender || { username: 'Operator', tag: socket.userTag || '@operator' }),
+        callerSocketId: socket.id,
         callType: data.callType,
         offer: data.offer,
       });
     } else {
-      socket.emit('call_rejected_signal', { reason: 'PEER_UNREACHABLE_OR_OFFLINE' });
+      socket.emit('call_rejected_signal', { reason: 'PEER_CURRENTLY_OFFLINE' });
     }
   });
 
   socket.on('call_answer', (data) => {
     const cleanCallerTag = normalizeTag(data.callerTag);
-    io.to(cleanCallerTag).emit('call_answered_signal', {
-      answer: data.answer,
-    });
+    if (data.callerSocketId) {
+      io.to(data.callerSocketId).emit('call_answered_signal', {
+        answer: data.answer,
+        answerSocketId: socket.id,
+      });
+    } else {
+      io.to(cleanCallerTag).emit('call_answered_signal', {
+        answer: data.answer,
+        answerSocketId: socket.id,
+      });
+    }
+    // Cancel call alert on callee's other devices
+    if (socket.userTag) {
+      socket.to(normalizeTag(socket.userTag)).emit('call_answered_elsewhere');
+    }
   });
 
   socket.on('ice_candidate', (data) => {
     const cleanTargetTag = normalizeTag(data.targetTag);
-    io.to(cleanTargetTag).emit('ice_candidate_signal', {
-      candidate: data.candidate,
-      fromTag: socket.userTag,
-    });
+    if (data.targetSocketId) {
+      io.to(data.targetSocketId).emit('ice_candidate_signal', {
+        candidate: data.candidate,
+        fromTag: socket.userTag,
+        fromSocketId: socket.id,
+      });
+    } else {
+      io.to(cleanTargetTag).emit('ice_candidate_signal', {
+        candidate: data.candidate,
+        fromTag: socket.userTag,
+        fromSocketId: socket.id,
+      });
+    }
   });
 
   socket.on('call_reject', (data) => {
     const cleanCallerTag = normalizeTag(data.callerTag);
-    io.to(cleanCallerTag).emit('call_rejected_signal', {
-      reason: data.reason || 'CALL_DECLINED_BY_PEER',
-    });
+    if (data.callerSocketId) {
+      io.to(data.callerSocketId).emit('call_rejected_signal', {
+        reason: data.reason || 'CALL_DECLINED_BY_PEER',
+      });
+    } else {
+      io.to(cleanCallerTag).emit('call_rejected_signal', {
+        reason: data.reason || 'CALL_DECLINED_BY_PEER',
+      });
+    }
   });
 
   socket.on('call_end', (data) => {
     const cleanTargetTag = normalizeTag(data.targetTag);
     io.to(cleanTargetTag).emit('call_ended_signal');
+    if (socket.userTag) {
+      socket.to(normalizeTag(socket.userTag)).emit('call_ended_signal');
+    }
   });
 
   // 8. Disconnect Handler

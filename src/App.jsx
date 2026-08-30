@@ -460,6 +460,54 @@ function App() {
         }
       },
 
+      onSyncSentMessage: ({ recipientTag, message }) => {
+        const cleanTag = recipientTag?.toLowerCase()?.trim();
+        const cleanUser = cleanTag.replace(/^@/, '');
+        let targetContact = contactsRef.current.find(
+          (c) => (c.tag && c.tag.toLowerCase().trim() === cleanTag) || (c.name && c.name.toLowerCase().trim() === cleanUser)
+        );
+        let targetId = targetContact?.id;
+
+        if (!targetContact) {
+          targetId = `peer_${cleanUser || Date.now()}`;
+          targetContact = {
+            id: targetId,
+            name: cleanUser,
+            tag: cleanTag,
+            avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+            status: 'offline',
+            lastSeen: 'offline',
+            ip: '192.168.1.x',
+            pgp: 'PGP-4096-LIVE-PEER',
+            unreadCount: 0,
+            pinned: false,
+            isSecret: false,
+            disappearingTimer: 0,
+            customStatus: 'Known Node',
+            bio: 'Synced peer node.',
+          };
+          setContacts((prev) => [
+            targetContact,
+            ...prev.filter(c => c.tag?.toLowerCase() !== cleanTag && c.id !== targetId)
+          ]);
+        }
+
+        setMessages((prev) => {
+          const currentThread = prev[targetId] || [];
+          if (currentThread.some((m) => m.id === message.id)) {
+            return prev;
+          }
+          return {
+            ...prev,
+            [targetId]: [...currentThread, message],
+          };
+        });
+      },
+
+      onCallAnsweredElsewhere: () => {
+        setIncomingCallAlert(null);
+      },
+
       onIncomingCall: (callData) => {
         soundFX.playRing();
         setIncomingCallAlert(callData);

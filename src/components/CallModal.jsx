@@ -20,10 +20,29 @@ const ICE_SERVERS = {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
   ],
+  iceCandidatePoolSize: 10,
 };
 
-const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOffer = null, onClose }) => {
+const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOffer = null, callerSocketId = null, onClose }) => {
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(callType === 'audio');
   const [isScreenSharing, setIsScreenSharing] = useState(false);
@@ -32,17 +51,21 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
   const [callStatus, setCallStatus] = useState(isIncoming ? 'CONNECTING SIGNAL...' : 'DIALING NODE...');
   const [freqBars, setFreqBars] = useState(Array.from({ length: 16 }, () => 20));
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
   const [stats, setStats] = useState({ rtt: 18, packetLoss: 0, bitrate: '128 kbps', cipher: 'AES-GCM-256' });
 
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const localStreamRef = useRef(null);
+  const remoteStreamRef = useRef(null);
   const screenStreamRef = useRef(null);
   const peerConnRef = useRef(null);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
   const animFrameRef = useRef(null);
   const modalContainerRef = useRef(null);
+  const iceCandidateQueueRef = useRef([]);
+  const isRemoteDescSetRef = useRef(false);
 
   // Initialize Web Audio Frequency Analyser for real-time live microphone spectrum
   const setupAudioAnalyser = useCallback((stream) => {
@@ -104,6 +127,8 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
       peerConnRef.current.close();
       peerConnRef.current = null;
     }
+    iceCandidateQueueRef.current = [];
+    isRemoteDescSetRef.current = false;
   }, []);
 
   // End Call handler
@@ -115,6 +140,31 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
     cleanUpAllStreams();
     onClose();
   }, [contact, cleanUpAllStreams, onClose]);
+
+  // Helper to drain pending ICE candidates once remote description is ready
+  const drainIceCandidateQueue = useCallback(async () => {
+    if (!peerConnRef.current) return;
+    while (iceCandidateQueueRef.current.length > 0) {
+      const cand = iceCandidateQueueRef.current.shift();
+      try {
+        await peerConnRef.current.addIceCandidate(new RTCIceCandidate(cand));
+      } catch (e) {
+        console.warn('[WEBRTC] addIceCandidate drain note:', e);
+      }
+    }
+  }, []);
+
+  // Sync video element attachments
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStreamRef.current) {
+      remoteVideoRef.current.srcObject = remoteStreamRef.current;
+      remoteVideoRef.current.play().catch(() => {});
+    }
+    if (localVideoRef.current && localStreamRef.current) {
+      localVideoRef.current.srcObject = localStreamRef.current;
+      localVideoRef.current.play().catch(() => {});
+    }
+  }, [hasRemoteVideo, isVideoOff, isScreenSharing]);
 
   // Establish WebRTC Connection
   useEffect(() => {
@@ -129,16 +179,30 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
         // Remote stream track receiver
         pc.ontrack = (event) => {
           console.log('[WEBRTC] Remote track received:', event.track.kind);
-          if (remoteVideoRef.current && event.streams[0]) {
-            remoteVideoRef.current.srcObject = event.streams[0];
+          let inboundStream = remoteStreamRef.current;
+          if (!inboundStream) {
+            inboundStream = event.streams && event.streams[0] ? event.streams[0] : new MediaStream();
+            remoteStreamRef.current = inboundStream;
           }
-          setCallStatus('ENCRYPTED P2P LINK ESTABLISHED');
+          if (!inboundStream.getTracks().includes(event.track)) {
+            inboundStream.addTrack(event.track);
+          }
+
+          if (event.track.kind === 'video') {
+            setHasRemoteVideo(true);
+          }
+
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = inboundStream;
+            remoteVideoRef.current.play().catch((e) => console.warn('[WEBRTC] remote play:', e));
+          }
+          setCallStatus('CONNECTED // AES-256 QUANTUM LINK');
         };
 
         // ICE candidate handler
         pc.onicecandidate = (event) => {
           if (event.candidate && contact?.tag) {
-            socketService.emitIceCandidate(contact.tag, event.candidate);
+            socketService.emitIceCandidate(contact.tag, event.candidate, callerSocketId);
           }
         };
 
@@ -148,7 +212,23 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
             setCallStatus('CONNECTED // AES-256 QUANTUM LINK');
             soundFX.playBeep(880, 'sine', 0.15);
           } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-            setCallStatus('CONNECTION LOST');
+            setCallStatus('RECONNECTING SIGNAL...');
+            try {
+              if (pc.restartIce) pc.restartIce();
+            } catch (e) {
+              console.warn('[WEBRTC] restartIce note:', e);
+            }
+          }
+        };
+
+        pc.oniceconnectionstatechange = () => {
+          console.log('[WEBRTC] ICE Connection State:', pc.iceConnectionState);
+          if (pc.iceConnectionState === 'failed') {
+            try {
+              if (pc.restartIce) pc.restartIce();
+            } catch (e) {
+              console.warn('[WEBRTC] restartIce note:', e);
+            }
           }
         };
 
@@ -157,12 +237,28 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
         try {
           if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
             stream = await navigator.mediaDevices.getUserMedia({
-              audio: true,
-              video: callType === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
+              audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+              },
+              video: callType === 'video' ? {
+                width: { ideal: 640, max: 1280 },
+                height: { ideal: 480, max: 720 },
+                frameRate: { ideal: 24, max: 30 },
+                facingMode: 'user',
+              } : false,
             });
           }
         } catch (mediaErr) {
-          console.warn('[WEBRTC] Real media device access failed or denied, using simulated stream:', mediaErr);
+          console.warn('[WEBRTC] Media device access fallback:', mediaErr);
+          try {
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+              stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            }
+          } catch {
+            // Simulated audio stream fallback
+          }
         }
 
         if (isCancelled) return;
@@ -180,9 +276,12 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
         if (isIncoming && incomingOffer) {
           // Answering Incoming Call
           await pc.setRemoteDescription(new RTCSessionDescription(incomingOffer));
+          isRemoteDescSetRef.current = true;
+          await drainIceCandidateQueue();
+
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
-          socketService.emitCallAnswer(contact.tag, answer);
+          socketService.emitCallAnswer(contact.tag, answer, callerSocketId);
           setCallStatus('CONNECTED // AES-256 QUANTUM LINK');
         } else {
           // Outgoing Call Initiation
@@ -206,6 +305,8 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
         if (peerConnRef.current && data.answer) {
           try {
             await peerConnRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+            isRemoteDescSetRef.current = true;
+            await drainIceCandidateQueue();
             setCallStatus('CONNECTED // AES-256 QUANTUM LINK');
           } catch (e) {
             console.warn('[WEBRTC] setRemoteDescription error:', e);
@@ -214,18 +315,22 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
       });
 
       socketService.socket.on('ice_candidate_signal', async (data) => {
-        if (peerConnRef.current && data.candidate) {
-          try {
-            await peerConnRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
-          } catch (e) {
-            console.warn('[WEBRTC] addIceCandidate error:', e);
+        if (data.candidate) {
+          if (peerConnRef.current && isRemoteDescSetRef.current) {
+            try {
+              await peerConnRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+            } catch (e) {
+              console.warn('[WEBRTC] addIceCandidate error:', e);
+            }
+          } else {
+            iceCandidateQueueRef.current.push(data.candidate);
           }
         }
       });
 
       socketService.socket.on('call_rejected_signal', (data) => {
         setCallStatus(`CALL REJECTED: ${data.reason || 'BUSY'}`);
-        setTimeout(() => handleEndCall(), 2000);
+        setTimeout(() => handleEndCall(), 2500);
       });
 
       socketService.socket.on('call_ended_signal', () => {
@@ -238,7 +343,7 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
       isCancelled = true;
       cleanUpAllStreams();
     };
-  }, [callType, contact, incomingOffer, isIncoming, cleanUpAllStreams, handleEndCall, setupAudioAnalyser]);
+  }, [callType, contact, incomingOffer, isIncoming, callerSocketId, cleanUpAllStreams, handleEndCall, setupAudioAnalyser, drainIceCandidateQueue]);
 
   // Duration Timer
   useEffect(() => {
@@ -381,16 +486,18 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
                   ref={remoteVideoRef}
                   autoPlay
                   playsInline
-                  className="remote-video-elem"
+                  className={`remote-video-elem ${hasRemoteVideo ? 'video-live' : 'video-pending'}`}
                 />
-                <div className="target-face-box">
-                  <div className="corner c-tl"></div>
-                  <div className="corner c-tr"></div>
-                  <div className="corner c-bl"></div>
-                  <div className="corner c-br"></div>
-                  <img src={contact.avatar} alt={contact.name} className="feed-avatar-blur" />
-                  <span className="face-tag">NODE_LOCK: {contact.name}</span>
-                </div>
+                {!hasRemoteVideo && (
+                  <div className="target-face-box">
+                    <div className="corner c-tl"></div>
+                    <div className="corner c-tr"></div>
+                    <div className="corner c-bl"></div>
+                    <div className="corner c-br"></div>
+                    <img src={contact.avatar} alt={contact.name} className="feed-avatar-blur" />
+                    <span className="face-tag">CONNECTING VIDEO LINK: {contact.name}</span>
+                  </div>
+                )}
               </div>
 
               {/* Local Video Stream Picture-in-Picture */}
