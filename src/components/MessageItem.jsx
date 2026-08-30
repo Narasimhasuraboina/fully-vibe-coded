@@ -57,10 +57,14 @@ const MessageItem = ({
 
   const audioElemRef = useRef(null);
 
-  // Active burn-after-read countdown timer
+  // Active burn-after-read countdown timer (pauses when browser tab is inactive/hidden)
   useEffect(() => {
     if (burnSecondsRemaining !== null && burnSecondsRemaining > 0) {
       const timer = setTimeout(() => {
+        // Freeze countdown if user has switched tabs or minimized the app
+        if (typeof document !== 'undefined' && document.hidden) {
+          return;
+        }
         setBurnSecondsRemaining((prev) => (prev > 0 ? prev - 1 : 0));
       }, 1000);
       return () => clearTimeout(timer);

@@ -20,7 +20,26 @@ const ICE_SERVERS = {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
   ],
+  iceCandidatePoolSize: 10,
 };
 
 const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOffer = null, onClose }) => {
@@ -43,6 +62,8 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
   const analyserRef = useRef(null);
   const animFrameRef = useRef(null);
   const modalContainerRef = useRef(null);
+  const iceCandidateQueueRef = useRef([]);
+  const isRemoteDescSetRef = useRef(false);
 
   // Initialize Web Audio Frequency Analyser for real-time live microphone spectrum
   const setupAudioAnalyser = useCallback((stream) => {
@@ -104,17 +125,31 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
       peerConnRef.current.close();
       peerConnRef.current = null;
     }
+    iceCandidateQueueRef.current = [];
+    isRemoteDescSetRef.current = false;
   }, []);
 
   // End Call handler
   const handleEndCall = useCallback(() => {
-    soundFX.playGlitchAlarm();
     if (contact?.tag) {
       socketService.emitCallEnd(contact.tag);
     }
     cleanUpAllStreams();
     onClose();
   }, [contact, cleanUpAllStreams, onClose]);
+
+  // Helper to drain pending ICE candidates once remote description is ready
+  const drainIceCandidateQueue = useCallback(async () => {
+    if (!peerConnRef.current) return;
+    while (iceCandidateQueueRef.current.length > 0) {
+      const cand = iceCandidateQueueRef.current.shift();
+      try {
+        await peerConnRef.current.addIceCandidate(new RTCIceCandidate(cand));
+      } catch (e) {
+        console.warn('[WEBRTC] addIceCandidate drain note:', e);
+      }
+    }
+  }, []);
 
   // Establish WebRTC Connection
   useEffect(() => {
@@ -146,9 +181,24 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
           console.log('[WEBRTC] Connection State:', pc.connectionState);
           if (pc.connectionState === 'connected') {
             setCallStatus('CONNECTED // AES-256 QUANTUM LINK');
-            soundFX.playBeep(880, 'sine', 0.15);
           } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-            setCallStatus('CONNECTION LOST');
+            setCallStatus('RECONNECTING MESH SIGNAL...');
+            try {
+              if (pc.restartIce) pc.restartIce();
+            } catch (e) {
+              console.warn('[WEBRTC] restartIce note:', e);
+            }
+          }
+        };
+
+        pc.oniceconnectionstatechange = () => {
+          console.log('[WEBRTC] ICE Connection State:', pc.iceConnectionState);
+          if (pc.iceConnectionState === 'failed') {
+            try {
+              if (pc.restartIce) pc.restartIce();
+            } catch (e) {
+              console.warn('[WEBRTC] restartIce note:', e);
+            }
           }
         };
 
@@ -157,12 +207,29 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
         try {
           if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
             stream = await navigator.mediaDevices.getUserMedia({
-              audio: true,
-              video: callType === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
+              audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+              },
+              video: callType === 'video' ? {
+                width: { ideal: 640, max: 1280 },
+                height: { ideal: 480, max: 720 },
+                frameRate: { ideal: 24, max: 30 },
+                facingMode: 'user',
+              } : false,
             });
           }
         } catch (mediaErr) {
-          console.warn('[WEBRTC] Real media device access failed or denied, using simulated stream:', mediaErr);
+          console.warn('[WEBRTC] Media device access fallback:', mediaErr);
+          // Try audio only fallback
+          try {
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+              stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            }
+          } catch {
+            // Simulated / mock audio fallback
+          }
         }
 
         if (isCancelled) return;
@@ -180,6 +247,9 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
         if (isIncoming && incomingOffer) {
           // Answering Incoming Call
           await pc.setRemoteDescription(new RTCSessionDescription(incomingOffer));
+          isRemoteDescSetRef.current = true;
+          await drainIceCandidateQueue();
+
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           socketService.emitCallAnswer(contact.tag, answer);
@@ -189,7 +259,6 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
           socketService.emitCallOffer(contact.tag, callType, offer);
-          soundFX.playRing();
         }
 
       } catch (err) {
@@ -206,6 +275,8 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
         if (peerConnRef.current && data.answer) {
           try {
             await peerConnRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+            isRemoteDescSetRef.current = true;
+            await drainIceCandidateQueue();
             setCallStatus('CONNECTED // AES-256 QUANTUM LINK');
           } catch (e) {
             console.warn('[WEBRTC] setRemoteDescription error:', e);
@@ -214,18 +285,22 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
       });
 
       socketService.socket.on('ice_candidate_signal', async (data) => {
-        if (peerConnRef.current && data.candidate) {
-          try {
-            await peerConnRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
-          } catch (e) {
-            console.warn('[WEBRTC] addIceCandidate error:', e);
+        if (data.candidate) {
+          if (peerConnRef.current && isRemoteDescSetRef.current) {
+            try {
+              await peerConnRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+            } catch (e) {
+              console.warn('[WEBRTC] addIceCandidate error:', e);
+            }
+          } else {
+            iceCandidateQueueRef.current.push(data.candidate);
           }
         }
       });
 
       socketService.socket.on('call_rejected_signal', (data) => {
         setCallStatus(`CALL REJECTED: ${data.reason || 'BUSY'}`);
-        setTimeout(() => handleEndCall(), 2000);
+        setTimeout(() => handleEndCall(), 2500);
       });
 
       socketService.socket.on('call_ended_signal', () => {
@@ -238,7 +313,7 @@ const CallModal = ({ contact, callType = 'audio', isIncoming = false, incomingOf
       isCancelled = true;
       cleanUpAllStreams();
     };
-  }, [callType, contact, incomingOffer, isIncoming, cleanUpAllStreams, handleEndCall, setupAudioAnalyser]);
+  }, [callType, contact, incomingOffer, isIncoming, cleanUpAllStreams, handleEndCall, setupAudioAnalyser, drainIceCandidateQueue]);
 
   // Duration Timer
   useEffect(() => {
