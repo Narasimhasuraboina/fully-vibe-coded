@@ -107,6 +107,7 @@ function App() {
   // References for Real-time event handlers
   const activeContactRef = useRef(activeContactId);
   const contactsRef = useRef(contacts);
+  const sendMessageRef = useRef(null);
 
   useEffect(() => {
     activeContactRef.current = activeContactId;
@@ -567,6 +568,7 @@ function App() {
 
   // Logout Handler
   const handleLogout = () => {
+    socketService.disconnect();
     setMyProfile(null);
     localStorage.removeItem('chatforge_my_profile');
     setIsRealtimeConnected(false);
@@ -586,7 +588,11 @@ function App() {
     if (!recipientTag) return;
 
     const newMsg = createMessageObject(
-      messagePayload,
+      {
+        ...messagePayload,
+        burnAfterRead: messagePayload.burnAfterRead ?? targetContact.disappearingTimer > 0,
+        burnCountdown: messagePayload.burnCountdown ?? (targetContact.disappearingTimer > 0 ? targetContact.disappearingTimer : null),
+      },
       true,
       gbSettings.hideBlueTicks
     );
@@ -638,6 +644,36 @@ function App() {
     }
   };
 
+  useEffect(() => {
+    sendMessageRef.current = handleSendMessage;
+  });
+
+  // Dispatch scheduled messages once their UTC minute arrives.
+  useEffect(() => {
+    const dispatchDueMessages = () => {
+      const now = new Date();
+      const currentTime = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`;
+      const dueMessages = scheduledMessages.filter(
+        (item) => item.status === 'pending' && item.scheduledTime === currentTime
+      );
+
+      if (dueMessages.length === 0) return;
+
+      dueMessages.forEach((item) => {
+        sendMessageRef.current?.({ type: 'text', text: item.message }, item.contactId);
+      });
+      setScheduledMessages((prev) => prev.map((item) =>
+        dueMessages.some((due) => due.id === item.id)
+          ? { ...item, status: 'sent', sentAt: Date.now() }
+          : item
+      ));
+    };
+
+    dispatchDueMessages();
+    const interval = setInterval(dispatchDueMessages, 10000);
+    return () => clearInterval(interval);
+  }, [scheduledMessages]);
+
   // Message Reaction Handler
   const handleReactMessage = (messageId, emoji) => {
     if (!activeContact) return;
@@ -678,6 +714,7 @@ function App() {
       });
       return { ...prev, [activeContact.id]: updated };
     });
+    socketService.emitMessageShredded(messageId, activeContact.tag);
   };
 
   // Delete for Me
@@ -756,9 +793,10 @@ function App() {
   };
 
   // Forward Message
-  const handleForwardMessage = (targetContactIds) => {
+  const handleForwardMessage = (targetContactIds, customTag = '') => {
     if (!forwardingMessage) return;
-    targetContactIds.forEach((cId) => {
+    const targets = Array.isArray(targetContactIds) ? targetContactIds : [];
+    targets.forEach((cId) => {
       const fwdPayload = {
         ...forwardingMessage,
         id: `fwd_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -766,6 +804,16 @@ function App() {
       };
       handleSendMessage(fwdPayload, cId);
     });
+
+    if (customTag) {
+      const cleanTag = customTag.startsWith('@') ? customTag : `@${customTag}`;
+      const existing = contacts.find((contact) => contact.tag?.toLowerCase() === cleanTag.toLowerCase());
+      if (existing) {
+        handleSendMessage({ ...forwardingMessage, id: undefined, replyTo: null }, existing.id);
+      } else {
+        handleStartDirectChat(cleanTag, forwardingMessage.text || 'Forwarded encrypted payload');
+      }
+    }
     setForwardingMessage(null);
   };
 
@@ -954,7 +1002,6 @@ function App() {
           currentProfile={myProfile}
           onSaveProfile={(newProf) => {
             setMyProfile(newProf);
-            socketService.connect(newProf);
           }}
           onClose={() => setShowProfileModal(false)}
           serverInfo={serverInfo}

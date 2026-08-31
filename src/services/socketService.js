@@ -17,7 +17,7 @@ class RealtimeSocketService {
   }
 
   initSocket() {
-    if (this.socket && this.isConnected) return this.socket;
+    if (this.socket) return this.socket;
 
     const serverUrl = this.getServerUrl();
     this.socket = io(serverUrl, {
@@ -51,18 +51,9 @@ class RealtimeSocketService {
       if (typeof callback === 'function') callback(res);
     };
 
-    // Safety timeout: if relay server is cold-starting or offline, grant local operator session
+    // Never grant an authenticated session without a server response.
     timeoutId = setTimeout(() => {
-      safeCallback({
-        success: true,
-        peerInfo: {
-          username: authData.username,
-          avatar: authData.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-          tag: `@${authData.username.toLowerCase()}`,
-          customStatus: authData.customStatus || 'Operating on Standby Matrix',
-          localOnly: true,
-        }
-      });
+      safeCallback({ success: false, error: 'Relay server did not respond. Check the connection and try again.' });
     }, 4500);
 
     const socket = this.initSocket();
@@ -78,28 +69,10 @@ class RealtimeSocketService {
         });
       });
       socket.once('connect_error', () => {
-        safeCallback({
-          success: true,
-          peerInfo: {
-            username: authData.username,
-            avatar: authData.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-            tag: `@${authData.username.toLowerCase()}`,
-            customStatus: authData.customStatus || 'Operating in Standby Matrix',
-            localOnly: true,
-          }
-        });
+        safeCallback({ success: false, error: 'Could not connect to the relay server.' });
       });
     } else {
-      safeCallback({
-        success: true,
-        peerInfo: {
-          username: authData.username,
-          avatar: authData.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-          tag: `@${authData.username.toLowerCase()}`,
-          customStatus: authData.customStatus || 'Operating in Standby Matrix',
-          localOnly: true,
-        }
-      });
+      safeCallback({ success: false, error: 'Could not initialize a relay connection.' });
     }
   }
 
@@ -193,6 +166,10 @@ class RealtimeSocketService {
 
     this.socket.on('message_queued_server_ack', (data) => {
       if (callbacks.onMessageQueuedInServerMailbox) callbacks.onMessageQueuedInServerMailbox(data);
+    });
+
+    this.socket.on('message_rejected', (data) => {
+      if (callbacks.onMessageRejected) callbacks.onMessageRejected(data);
     });
 
     this.socket.on('mailbox_delivered_summary', (data) => {
@@ -296,6 +273,13 @@ class RealtimeSocketService {
     if (this.socket && this.isConnected) {
       this.socket.emit('typing_indicator', { recipientTag, isTyping });
     }
+  }
+
+  disconnect() {
+    if (this.socket) this.socket.disconnect();
+    this.socket = null;
+    this.isConnected = false;
+    this.currentProfile = null;
   }
 
   // SENDER-SIDE OFFLINE OUTBOX STORAGE (Zero Server Knowledge)

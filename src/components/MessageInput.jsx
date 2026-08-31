@@ -42,6 +42,7 @@ const MessageInput = ({ onSendMessage, replyingTo, onCancelReply, activeContact 
   
   // Voice Recording Refs
   const mediaRecorderRef = useRef(null);
+  const recordingStreamRef = useRef(null);
   const audioChunksRef = useRef([]);
   const recordTimerRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -62,6 +63,7 @@ const MessageInput = ({ onSendMessage, replyingTo, onCancelReply, activeContact 
       document.removeEventListener('touchstart', handleClickOutside);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+      recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
     };
   }, []);
 
@@ -211,6 +213,7 @@ const MessageInput = ({ onSendMessage, replyingTo, onCancelReply, activeContact 
     try {
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        recordingStreamRef.current = stream;
         const mediaRecorder = new MediaRecorder(stream);
         mediaRecorderRef.current = mediaRecorder;
 
@@ -251,6 +254,8 @@ const MessageInput = ({ onSendMessage, replyingTo, onCancelReply, activeContact 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
+    recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+    recordingStreamRef.current = null;
     clearInterval(recordTimerRef.current);
     setIsRecording(false);
     setRecordSeconds(0);
@@ -264,6 +269,8 @@ const MessageInput = ({ onSendMessage, replyingTo, onCancelReply, activeContact 
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.onstop = () => {
+        recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         const reader = new FileReader();
         reader.onloadend = () => {
@@ -354,21 +361,21 @@ const MessageInput = ({ onSendMessage, replyingTo, onCancelReply, activeContact 
         ref={fileInputRef}
         accept="image/*"
         style={{ display: 'none' }}
-        onChange={(e) => handleProcessFile(e.target.files?.[0])}
+        onChange={(e) => { handleProcessFile(e.target.files?.[0]); e.target.value = ''; }}
       />
       <input
         type="file"
         ref={videoInputRef}
         accept="video/*"
         style={{ display: 'none' }}
-        onChange={(e) => handleProcessFile(e.target.files?.[0])}
+        onChange={(e) => { handleProcessFile(e.target.files?.[0]); e.target.value = ''; }}
       />
       <input
         type="file"
         ref={docInputRef}
         accept="*/*"
         style={{ display: 'none' }}
-        onChange={(e) => handleProcessFile(e.target.files?.[0])}
+        onChange={(e) => { handleProcessFile(e.target.files?.[0]); e.target.value = ''; }}
       />
       <input
         type="file"
@@ -376,7 +383,7 @@ const MessageInput = ({ onSendMessage, replyingTo, onCancelReply, activeContact 
         accept="image/*"
         capture="environment"
         style={{ display: 'none' }}
-        onChange={(e) => handleProcessFile(e.target.files?.[0])}
+        onChange={(e) => { handleProcessFile(e.target.files?.[0]); e.target.value = ''; }}
       />
 
       {/* Reply banner */}

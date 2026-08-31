@@ -126,6 +126,10 @@ function getSanitizedDirectory() {
   return Array.from(registeredUsers.values()).map(sanitizeUser);
 }
 
+function emitPeerDirectory(socket) {
+  socket.emit('online_peers_list', getSanitizedDirectory());
+}
+
 // Helper to get local network IP address
 function getLocalNetworkIP() {
   const interfaces = os.networkInterfaces();
@@ -222,7 +226,7 @@ io.on('connection', (socket) => {
     const password = authData.password || '';
     const isRegisterMode = authData.isRegisterMode;
 
-    if (!cleanUser || cleanUser.length < 2) {
+    if (!cleanUser || cleanUser.length < 2 || !/^[a-zA-Z0-9_]+$/.test(cleanUser)) {
       const resp = { success: false, error: 'Username must be at least 2 characters.' };
       if (typeof callback === 'function') callback(resp);
       else socket.emit('auth_response', resp);
@@ -230,26 +234,6 @@ io.on('connection', (socket) => {
     }
 
     const existing = registeredUsers.get(tag);
-
-    // If session reconnect without password for an existing registered operator
-    if ((!password || password.length < 4) && existing) {
-      socket.join(tag);
-      existing.socketId = socket.id;
-      existing.status = 'online';
-      existing.lastSeen = 'online';
-      existing.ip = clientIP;
-      socket.userTag = tag;
-      saveUserDatabase();
-      console.log(`[SESSION RESUMED] Operator ${cleanUser} (${tag}) re-attached socket ${socket.id}.`);
-
-      const safeUser = sanitizeUser(existing);
-      const resp = { success: true, peerInfo: safeUser, localIP };
-      if (typeof callback === 'function') callback(resp);
-      socket.emit('registered', resp);
-      deliverPendingMailboxMessages(tag, socket);
-      socket.broadcast.emit('peer_online_event', { peer: safeUser, timestamp: Date.now() });
-      return;
-    }
 
     if (!password || password.length < 4) {
       const resp = { success: false, error: 'Password must be at least 4 characters.' };
@@ -300,6 +284,7 @@ io.on('connection', (socket) => {
 
       if (typeof callback === 'function') callback(resp);
       socket.emit('registered', resp);
+      emitPeerDirectory(socket);
 
       // Flush any pending encrypted store-and-forward mailbox messages!
       deliverPendingMailboxMessages(tag, socket);
@@ -310,6 +295,13 @@ io.on('connection', (socket) => {
       });
 
     } else {
+      if (!isRegisterMode) {
+        const resp = { success: false, error: `Codename "${tag}" is not registered. Switch to REGISTER to create it.` };
+        if (typeof callback === 'function') callback(resp);
+        else socket.emit('auth_response', resp);
+        return;
+      }
+
       // New User Registration
       socket.join(tag);
       const newUser = {
@@ -339,6 +331,7 @@ io.on('connection', (socket) => {
 
       if (typeof callback === 'function') callback(resp);
       socket.emit('registered', resp);
+      emitPeerDirectory(socket);
 
       // Flush any pending encrypted store-and-forward mailbox messages!
       deliverPendingMailboxMessages(tag, socket);
@@ -396,30 +389,12 @@ io.on('connection', (socket) => {
 
   // 3. Relay Message Protocol with Room-based Delivery & Store-and-Forward Encrypted Mailbox
   socket.on('send_message', (payload) => {
-    let senderTag = socket.userTag;
-    if (!senderTag && payload.senderTag) {
-      senderTag = normalizeTag(payload.senderTag);
-      socket.userTag = senderTag;
-      socket.join(senderTag);
+    const senderTag = socket.userTag;
+    const sender = senderTag ? registeredUsers.get(normalizeTag(senderTag)) : null;
+    if (!sender || !payload || typeof payload.message !== 'object') {
+      socket.emit('message_rejected', { error: 'Authenticate before sending a message.' });
+      return;
     }
-    if (!senderTag && payload.message?.senderTag) {
-      senderTag = normalizeTag(payload.message.senderTag);
-      socket.userTag = senderTag;
-      socket.join(senderTag);
-    }
-
-    let sender = senderTag ? registeredUsers.get(normalizeTag(senderTag)) : null;
-    if (!sender && senderTag) {
-      sender = {
-        username: senderTag.replace(/^@/, ''),
-        tag: senderTag,
-        status: 'online',
-        socketId: socket.id,
-        avatar: payload.senderAvatar || `https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80`,
-      };
-      registeredUsers.set(senderTag, sender);
-    }
-    if (!sender) return;
 
     const { recipientTag, message } = payload;
     const cleanRecipientTag = normalizeTag(recipientTag);

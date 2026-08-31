@@ -28,14 +28,7 @@ const ForwardModal = ({ message, contacts = [], onClose, onForwardMessage }) => 
 
   const handleSendForward = () => {
     soundFX.playSent();
-    selectedContacts.forEach((contactId) => {
-      onForwardMessage(message, contactId);
-    });
-
-    if (customTag.trim()) {
-      onForwardMessage(message, customTag.trim());
-    }
-
+    onForwardMessage(selectedContacts, customTag.trim());
     onClose();
   };
 

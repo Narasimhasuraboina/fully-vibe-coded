@@ -266,7 +266,7 @@ const ChatArea = ({
                   className="text-danger" 
                   onClick={() => { 
                     setShowOptionsDropdown(false); 
-                    if (onDeleteContact) onDeleteContact(activeContact); 
+                    if (onDeleteContact) onDeleteContact(activeContact.id);
                   }}
                 >
                   <UserX size={14} className="text-danger" /> Delete Contact & Thread
