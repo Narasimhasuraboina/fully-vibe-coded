@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Phone, 
-  Video, 
   ShieldCheck, 
   Lock, 
   Search, 
@@ -28,7 +26,6 @@ const ChatArea = ({
   onReactMessage,
   onDeleteForEveryone,
   onDeleteForMe,
-  onStartCall,
   onUpdateContactDisappearing,
   onBurnShredMessage,
   onOpenEncryptionModal,
@@ -85,7 +82,7 @@ const ChatArea = ({
           </div>
           <h2>CHATFORGE PROTOCOL // STANDBY</h2>
           <p className="desc">
-            Select a target node from the left frequency matrix to initiate an encrypted end-to-end P2P session.
+            Select a target node from the left frequency matrix to initiate an encrypted end-to-end P2P messaging session.
           </p>
           <div className="quick-intel-cards">
             <div className="intel-card">
@@ -94,7 +91,7 @@ const ChatArea = ({
             </div>
             <div className="intel-card">
               <Radio size={16} className="text-accent" />
-              <span>Real-Time WebRTC P2P Video & Voice Calls</span>
+              <span>Real-Time Instant Socket Relay</span>
             </div>
             <div className="intel-card">
               <Zap size={16} className="text-accent" />
@@ -195,24 +192,6 @@ const ChatArea = ({
             title="Open Chat Media & Payload Vault"
           >
             <FolderLock size={17} />
-          </button>
-
-          {/* Voice Call */}
-          <button 
-            className="action-icon-btn" 
-            onClick={() => onStartCall(activeContact, 'audio')}
-            title="Start Encrypted P2P Voice Call"
-          >
-            <Phone size={17} />
-          </button>
-
-          {/* Video Call */}
-          <button 
-            className="action-icon-btn" 
-            onClick={() => onStartCall(activeContact, 'video')}
-            title="Start Encrypted Video HUD Call"
-          >
-            <Video size={17} />
           </button>
 
           {/* In-Chat Search */}

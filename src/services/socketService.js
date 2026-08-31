@@ -175,7 +175,7 @@ class RealtimeSocketService {
 
     this.socket.on('peer_online_event', ({ peer }) => {
       if (callbacks.onPeerOnline) callbacks.onPeerOnline(peer);
-      // Auto flush pending outbox for this newly online peer!
+      // Auto flush pending outbox for this newly online peer
       this.flushOutboxForPeer(peer.tag, callbacks.onOutboxMessageDispatched);
     });
 
@@ -213,26 +213,6 @@ class RealtimeSocketService {
 
     this.socket.on('peer_typing', (data) => {
       if (callbacks.onPeerTyping) callbacks.onPeerTyping(data);
-    });
-
-    this.socket.on('incoming_call_signal', (data) => {
-      if (callbacks.onIncomingCall) callbacks.onIncomingCall(data);
-    });
-
-    this.socket.on('call_answered_signal', (data) => {
-      if (callbacks.onCallAnswered) callbacks.onCallAnswered(data);
-    });
-
-    this.socket.on('ice_candidate_signal', (data) => {
-      if (callbacks.onIceCandidate) callbacks.onIceCandidate(data);
-    });
-
-    this.socket.on('call_rejected_signal', (data) => {
-      if (callbacks.onCallRejected) callbacks.onCallRejected(data);
-    });
-
-    this.socket.on('call_ended_signal', () => {
-      if (callbacks.onCallEnded) callbacks.onCallEnded();
     });
   }
 
@@ -298,7 +278,7 @@ class RealtimeSocketService {
   }
 
   // Notify sender that message has been viewed (triggering 1-view burn countdown)
-  emitMessageViewed(messageId, senderTag, burnDelay = 5) {
+  emitMessageViewed(messageId, senderTag, burnDelay = 10) {
     if (this.socket && this.isConnected) {
       this.socket.emit('message_viewed', { messageId, senderTag, burnDelay });
     }
@@ -315,37 +295,6 @@ class RealtimeSocketService {
   emitTyping(recipientTag, isTyping) {
     if (this.socket && this.isConnected) {
       this.socket.emit('typing_indicator', { recipientTag, isTyping });
-    }
-  }
-
-  // WebRTC Calling
-  emitCallOffer(targetTag, callType, offer) {
-    if (this.socket && this.isConnected) {
-      this.socket.emit('call_offer', { targetTag, callType, offer });
-    }
-  }
-
-  emitCallAnswer(callerTag, answer) {
-    if (this.socket && this.isConnected) {
-      this.socket.emit('call_answer', { callerTag, answer });
-    }
-  }
-
-  emitIceCandidate(targetTag, candidate) {
-    if (this.socket && this.isConnected) {
-      this.socket.emit('ice_candidate', { targetTag, candidate });
-    }
-  }
-
-  emitCallReject(callerTag, reason = 'CALL_DECLINED') {
-    if (this.socket && this.isConnected) {
-      this.socket.emit('call_reject', { callerTag, reason });
-    }
-  }
-
-  emitCallEnd(targetTag) {
-    if (this.socket && this.isConnected) {
-      this.socket.emit('call_end', { targetTag });
     }
   }
 

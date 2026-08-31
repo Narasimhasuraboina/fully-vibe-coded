@@ -19,10 +19,7 @@ import LoginScreen from './components/LoginScreen';
 import TopBar from './components/TopBar';
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
-import HackerInspector from './components/HackerInspector';
 import MatrixBackground from './components/MatrixBackground';
-import CallModal from './components/CallModal';
-import IncomingCallAlert from './components/IncomingCallAlert';
 import StatusViewerModal from './components/StatusViewerModal';
 import DirectChatModal from './components/DirectChatModal';
 import BroadcastModal from './components/BroadcastModal';
@@ -73,8 +70,8 @@ function App() {
   // State Initialization
   const [contacts, setContacts] = useState(() => loadState('contacts', INITIAL_CONTACTS));
   const [messages, setMessages] = useState(() => loadState('messages', INITIAL_MESSAGES));
-  const [stories, setStories] = useState(() => loadState('stories', INITIAL_STORIES));
-  const [autoReplies, setAutoReplies] = useState(() => loadState('auto_replies', INITIAL_AUTO_REPLIES));
+  const [stories] = useState(() => loadState('stories', INITIAL_STORIES));
+  const [autoReplies] = useState(() => loadState('auto_replies', INITIAL_AUTO_REPLIES));
   const [scheduledMessages, setScheduledMessages] = useState(() => loadState('scheduled', INITIAL_SCHEDULED));
   const [gbSettings, setGbSettings] = useState(() => loadState('gb_settings', DEFAULT_GB_SETTINGS));
   const [theme, setTheme] = useState(() => gbSettings.theme || 'matrix');
@@ -90,14 +87,9 @@ function App() {
   const [typingStatus, setTypingStatus] = useState({}); // { [contactId]: boolean }
 
   // Modals & Panels
-  const [isInspectorOpen, setIsInspectorOpen] = useState(false);
   const [isAppLocked, setIsAppLocked] = useState(false);
   const [isSecretUnlocked, setIsSecretUnlocked] = useState(false);
   const [showSecretUnlockModal, setShowSecretUnlockModal] = useState(false);
-  
-  // Real WebRTC Call states
-  const [callActive, setCallActive] = useState(null); // { contact, callType, isIncoming, incomingOffer }
-  const [incomingCallAlert, setIncomingCallAlert] = useState(null); // { callerInfo, callType, offer }
 
   // Enhanced Media & Feature Modals
   const [activeStoryId, setActiveStoryId] = useState(null);
@@ -248,84 +240,106 @@ function App() {
       senderContact = {
         id: targetContactId,
         name: senderUsername,
-        tag: cleanSenderTag,
+        tag: senderInfo?.tag || `@${cleanSenderUser}`,
         avatar: senderInfo?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
         status: 'online',
         lastSeen: 'online',
-        ip: senderInfo?.ip || '192.168.1.x',
-        pgp: 'PGP-4096-LIVE-PEER',
+        ip: senderInfo?.ip || '10.0.0.x',
+        pgp: 'PGP-4096-SEC',
         unreadCount: isCurrentlyViewing ? 0 : 1,
         pinned: false,
         isSecret: false,
         disappearingTimer: 0,
-        customStatus: senderInfo?.customStatus || 'Connected Live Peer Node',
-        bio: 'Real-time connected client device on mesh relay.',
+        customStatus: senderInfo?.customStatus || 'Encrypted Peer Node',
       };
       setContacts((prev) => [senderContact, ...prev]);
-      if (!activeContactRef.current && typeof window !== 'undefined' && window.innerWidth >= 768) {
-        setActiveContactId(targetContactId);
-      }
     } else {
-      // Mark contact online and increment unread count if not currently looking at this active chat
       setContacts((prev) =>
-        prev.map((c) =>
-          c.id === senderContact.id
-            ? {
-                ...c,
-                status: 'online',
-                lastSeen: 'online',
-                avatar: senderInfo?.avatar || c.avatar,
-                unreadCount: isCurrentlyViewing ? 0 : (c.unreadCount || 0) + 1,
-              }
-            : c
-        )
+        prev.map((c) => {
+          if (c.id === senderContact.id || (c.tag && c.tag.toLowerCase() === cleanSenderTag)) {
+            return {
+              ...c,
+              name: senderUsername || c.name,
+              avatar: senderInfo?.avatar || c.avatar,
+              status: 'online',
+              lastSeen: 'online',
+              unreadCount: isCurrentlyViewing ? 0 : (c.unreadCount || 0) + 1,
+            };
+          }
+          return c;
+        })
       );
     }
 
     const incomingMsg = {
       ...message,
-      sender: targetContactId,
-      status: isCurrentlyViewing ? 'read' : 'delivered',
+      sender: 'contact',
       burnCountdown: isCurrentlyViewing ? 10 : null,
+      status: isCurrentlyViewing ? 'read' : 'delivered',
     };
 
-    setMessages((prev) => {
-      const currentThread = prev[targetContactId] || [];
-      if (currentThread.some((m) => m.id === incomingMsg.id)) {
-        return prev;
-      }
-      return {
-        ...prev,
-        [targetContactId]: [...currentThread, incomingMsg],
-      };
-    });
-
-    // Auto-view signal if recipient is actively reading this chat right now
     if (isCurrentlyViewing) {
-      socketService.emitMessageViewed(message.id, senderInfo?.tag || cleanSenderTag, 10);
+      socketService.emitMessageViewed(incomingMsg.id, senderContact.tag, 10);
     }
 
-    // Push Desktop & HUD Toast Notification
-    const payloadSnippet = message.type === 'image' ? '📷 Encrypted Photo'
-      : message.type === 'video' ? '🎥 Encrypted Video Stream'
-      : message.type === 'audio' ? '🎙️ Voice Intercept'
-      : message.type === 'code' ? '💻 Executable Code Payload'
-      : message.text || 'Encrypted Payload';
+    setMessages((prev) => ({
+      ...prev,
+      [targetContactId]: [...(prev[targetContactId] || []), incomingMsg],
+    }));
 
     notificationService.pushToast({
-      title: `SIGNAL FROM ${senderInfo.username}`,
-      message: payloadSnippet,
-      avatar: senderInfo.avatar,
-      type: 'info',
+      title: `MESSAGE FROM ${senderContact.name.toUpperCase()}`,
+      message: message.text || (message.type === 'image' ? '📸 Sent an encrypted image' : '📁 Sent an attachment'),
+      type: 'message',
     });
 
-    notificationService.showDesktopNotification(`Signal from ${senderInfo.username}`, {
-      body: payloadSnippet,
-      icon: senderInfo.avatar || '/favicon.svg',
-    });
+    if (!isCurrentlyViewing) {
+      notificationService.showDesktopNotification(`Message from ${senderContact.name}`, {
+        body: message.text || 'Encrypted payload received',
+        icon: senderContact.avatar,
+      });
+    }
   }, []);
 
-  // Initialize Real-Time Socket Connection when user logs in
+  // Global Disappearing Messages Burn Countdown Engine (Pauses when tab is hidden)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (document.hidden) return;
+
+      setMessages((prev) => {
+        let hasChanges = false;
+        const nextState = { ...prev };
+
+        Object.keys(nextState).forEach((contactId) => {
+          const thread = nextState[contactId];
+          const updatedThread = [];
+
+          thread.forEach((msg) => {
+            if (msg.burnCountdown !== null && msg.burnCountdown !== undefined) {
+              hasChanges = true;
+              const nextCountdown = msg.burnCountdown - 1;
+              if (nextCountdown > 0) {
+                updatedThread.push({ ...msg, burnCountdown: nextCountdown });
+              } else {
+                // Countdown reached zero -> Shred message completely
+                handleBurnShredMessage(msg.id, contactId);
+              }
+            } else {
+              updatedThread.push(msg);
+            }
+          });
+
+          nextState[contactId] = updatedThread;
+        });
+
+        return hasChanges ? nextState : prev;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [handleBurnShredMessage]);
+
+  // Connect to Real-time Socket.io Relay
   useEffect(() => {
     if (!myProfile) return;
 
@@ -352,10 +366,6 @@ function App() {
           });
         });
       },
-
-
-
-
 
       // When peer comes online -> update status & flush outbox
       onPeerOnline: (peer) => {
@@ -424,7 +434,7 @@ function App() {
         });
       },
 
-      // Peer viewed message -> start 10s burn countdown on sender side too!
+      // Peer viewed message -> start 10s burn countdown on sender side too
       onMessageViewedByPeer: ({ messageId, burnDelay = 10 }) => {
         setMessages((prev) => {
           const updated = { ...prev };
@@ -460,15 +470,6 @@ function App() {
         }
       },
 
-      onIncomingCall: (callData) => {
-        soundFX.playRing();
-        setIncomingCallAlert(callData);
-        notificationService.showDesktopNotification(`Incoming Call from ${callData.callerInfo.username}`, {
-          body: `Encrypted ${callData.callType?.toUpperCase()} Call Intercept Request`,
-          icon: callData.callerInfo.avatar || '/favicon.svg',
-        });
-      },
-
       onOutboxMessageDispatched: (peerTag, msg) => {
         const cleanTag = peerTag?.toLowerCase()?.trim();
         setMessages((prev) => {
@@ -492,12 +493,92 @@ function App() {
       return;
     }
 
-    setContacts((prev) => [userContact, ...prev]);
-    setActiveContactId(userContact.id);
+    const newContact = {
+      id: userContact.id || `peer_${userContact.username.toLowerCase()}`,
+      name: userContact.username,
+      tag: userContact.tag,
+      avatar: userContact.avatar,
+      status: userContact.status || 'offline',
+      lastSeen: userContact.lastSeen || 'offline',
+      ip: userContact.ip || '10.0.0.x',
+      pgp: 'PGP-4096-NET',
+      unreadCount: 0,
+      pinned: false,
+      isSecret: false,
+      disappearingTimer: 0,
+      customStatus: userContact.customStatus || 'Discovered via Network Search',
+      bio: 'Verified network contact',
+    };
+
+    setContacts((prev) => [newContact, ...prev]);
+    setActiveContactId(newContact.id);
+  };
+
+  // Initiate Delete Contact Confirmation
+  const handleInitiateDeleteContact = (contactId) => {
+    const target = contacts.find(c => c.id === contactId);
+    if (target) {
+      setContactToDelete(target);
+    }
+  };
+
+  // Confirm Delete Contact Purge
+  const handleConfirmDeleteContact = () => {
+    if (!contactToDelete) return;
+    const targetId = contactToDelete.id;
+
+    soundFX.playGlitchAlarm();
+
+    // 1. Remove from contacts
+    setContacts(prev => prev.filter(c => c.id !== targetId));
+
+    // 2. Remove all messages and conversation history
+    setMessages(prev => {
+      const copy = { ...prev };
+      delete copy[targetId];
+      return copy;
+    });
+
+    // 3. Clear typing status
+    setTypingStatus(prev => {
+      const copy = { ...prev };
+      delete copy[targetId];
+      return copy;
+    });
+
+    // 4. If current active contact was deleted, reset to another contact or null
+    if (activeContactId === targetId) {
+      const remaining = contacts.filter(c => c.id !== targetId);
+      if (typeof window !== 'undefined' && window.innerWidth < 768) {
+        setActiveContactId(null);
+      } else {
+        setActiveContactId(remaining[0]?.id || null);
+      }
+    }
+
+    notificationService.pushToast({
+      title: 'CONTACT PURGED',
+      message: `Node @${contactToDelete.name} and conversation records permanently deleted from this device.`,
+      type: 'warning',
+    });
+
+    setContactToDelete(null);
+  };
+
+  // Logout Handler
+  const handleLogout = () => {
+    setMyProfile(null);
+    localStorage.removeItem('chatforge_my_profile');
+    setIsRealtimeConnected(false);
   };
 
   // Send Message Handler
-  const handleSendMessage = (messagePayload, targetId = activeContactId) => {
+  const handleSendMessage = (messagePayload, customTargetId = null) => {
+    const targetId = customTargetId || activeContactId;
+    if (!targetId) return;
+
+    soundFX.playSent();
+
     const targetContact = contacts.find((c) => c.id === targetId);
     if (!targetContact) return;
 
@@ -507,10 +588,10 @@ function App() {
     const newMsg = createMessageObject(
       messagePayload,
       true,
-      gbSettings.hideSecondTick
+      gbSettings.hideBlueTicks
     );
 
-    // 1. Update Sender's Message Thread State
+    // 1. Update Sender's Local UI State Immediately
     setMessages((prev) => ({
       ...prev,
       [targetId]: [...(prev[targetId] || []), newMsg],
@@ -527,108 +608,41 @@ function App() {
     setContacts((prev) =>
       prev.map((c) => (c.id === targetId ? { ...c, unreadCount: 0 } : c))
     );
-  };
 
-  // Forward Message Handler
-  const handleForwardMessage = (origMessage, targetContactIdOrTag) => {
-    let targetContact = contacts.find(c => c.id === targetContactIdOrTag || c.tag === targetContactIdOrTag);
-    let targetId = targetContact?.id;
+    // 4. Auto-Reply Trigger Evaluation (GB Mod Simulation)
+    if (targetContact.isAutoReply) {
+      setTimeout(() => {
+        const matchingRule = autoReplies.find(
+          (rule) =>
+            rule.enabled &&
+            (rule.type === 'exact'
+              ? (messagePayload.text || '').toLowerCase() === rule.trigger.toLowerCase()
+              : (messagePayload.text || '').toLowerCase().includes(rule.trigger.toLowerCase()))
+        );
 
-    if (!targetContact) {
-      targetId = `user_${Date.now()}`;
-      const cleanTag = targetContactIdOrTag.startsWith('@') ? targetContactIdOrTag : `@${targetContactIdOrTag}`;
-      const newC = {
-        id: targetId,
-        name: cleanTag.replace(/^@/, ''),
-        tag: cleanTag,
-        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-        status: 'offline',
-        lastSeen: 'offline',
-        ip: '192.168.1.x',
-        pgp: 'PGP-4096-FORWARD-PEER',
-        unreadCount: 0,
-        pinned: false,
-        isSecret: false,
-        disappearingTimer: 0,
-        customStatus: 'Forwarded peer node',
-        bio: 'Node added from message forward dispatch.',
-      };
-      setContacts((prev) => [newC, ...prev]);
+        const responseText = matchingRule
+          ? matchingRule.response
+          : `[AUTO-REPLY]: Operator is currently in stealth mode. Payload logged.`;
+
+        const autoMsg = createMessageObject(
+          { text: responseText },
+          false
+        );
+
+        setMessages((prev) => ({
+          ...prev,
+          [targetId]: [...(prev[targetId] || []), autoMsg],
+        }));
+        soundFX.playReceived();
+      }, 1200);
     }
-
-    const forwardPayload = {
-      type: origMessage.type,
-      text: origMessage.text,
-      mediaUrl: origMessage.mediaUrl,
-      code: origMessage.code,
-      language: origMessage.language,
-      fileName: origMessage.fileName,
-      fileSize: origMessage.fileSize,
-      checksum: origMessage.checksum,
-      audioDuration: origMessage.audioDuration,
-      audioWaveform: origMessage.audioWaveform,
-    };
-
-    handleSendMessage(forwardPayload, targetId);
   };
 
-  // Logout Handler
-  const handleLogout = () => {
-    setMyProfile(null);
-    localStorage.removeItem('chatforge_my_profile');
-    if (socketService.socket) {
-      socketService.socket.disconnect();
-    }
-    setIsRealtimeConnected(false);
-  };
-
-  // Initiate Delete Contact Prompt
-  const handleInitiateDeleteContact = (contact) => {
-    soundFX.playKeypress();
-    setContactToDelete(contact);
-  };
-
-  // Confirm and Purge Contact from Screen & Storage
-  const handleConfirmDeleteContact = () => {
-    if (!contactToDelete) return;
-    const target = contactToDelete;
-    soundFX.playGlitchAlarm();
-
-    // 1. Remove contact from contacts list
-    setContacts((prev) => {
-      const updated = prev.filter((c) => c.id !== target.id);
-      saveState('contacts', updated);
-      return updated;
-    });
-
-    // 2. Remove messages thread
-    setMessages((prev) => {
-      const updated = { ...prev };
-      delete updated[target.id];
-      saveState('messages', updated);
-      return updated;
-    });
-
-    // 3. Clear from local outbox if any
-    socketService.removeFromOutbox(target.tag);
-
-    // 4. Update active contact if deleted was currently active
-    if (activeContactId === target.id) {
-      setActiveContactId(null);
-    }
-
-    setContactToDelete(null);
-
-    notificationService.pushToast({
-      title: 'CONTACT PURGED',
-      message: `Node ${target.name} (${target.tag}) removed from terminal screen.`,
-      type: 'info',
-    });
-  };
-
-  // Reactions Handler
+  // Message Reaction Handler
   const handleReactMessage = (messageId, emoji) => {
     if (!activeContact) return;
+    soundFX.playKeypress();
+
     setMessages((prev) => {
       const thread = prev[activeContact.id] || [];
       const updated = thread.map((m) => {
@@ -678,14 +692,6 @@ function App() {
   // Clear Chat Thread
   const handleClearThread = (contactId) => {
     setMessages((prev) => ({ ...prev, [contactId]: [] }));
-  };
-
-  // Clear All Data
-  const handleClearAllData = () => {
-    setMessages({});
-    setContacts([]);
-    setStories([]);
-    localStorage.removeItem('chatforge_offline_outbox');
   };
 
   // Pin / Unpin Contact
@@ -749,36 +755,21 @@ function App() {
     });
   };
 
-  // Accept Incoming Call
-  const handleAcceptIncomingCall = (acceptedType) => {
-    if (!incomingCallAlert) return;
-    const caller = incomingCallAlert.callerInfo;
-    const offer = incomingCallAlert.offer;
-
-    setIncomingCallAlert(null);
-    setCallActive({
-      contact: {
-        name: caller.username,
-        tag: caller.tag,
-        avatar: caller.avatar,
-        ip: caller.ip,
-        pgp: 'PGP-4096-LIVE-PEER',
-      },
-      callType: acceptedType || incomingCallAlert.callType,
-      isIncoming: true,
-      incomingOffer: offer,
+  // Forward Message
+  const handleForwardMessage = (targetContactIds) => {
+    if (!forwardingMessage) return;
+    targetContactIds.forEach((cId) => {
+      const fwdPayload = {
+        ...forwardingMessage,
+        id: `fwd_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        replyTo: null,
+      };
+      handleSendMessage(fwdPayload, cId);
     });
+    setForwardingMessage(null);
   };
 
-  // Reject Incoming Call
-  const handleRejectIncomingCall = () => {
-    if (incomingCallAlert?.callerInfo?.tag) {
-      socketService.emitCallReject(incomingCallAlert.callerInfo.tag, 'CALL_DECLINED_BY_OPERATOR');
-    }
-    setIncomingCallAlert(null);
-  };
-
-  // IF USER IS NOT LOGGED IN -> RENDER TERMINAL LOGIN GATEWAY FIRST!
+  // IF USER IS NOT LOGGED IN -> RENDER TERMINAL LOGIN GATEWAY FIRST
   if (!myProfile) {
     return (
       <div className={`chatforge-app-root ${gbSettings.scanlinesEnabled ? 'crt-scanlines' : ''}`}>
@@ -794,7 +785,7 @@ function App() {
       {/* Toast Notification Container */}
       <ToastNotification />
 
-      {/* Background Matrix Effect */}
+      {/* Background Cyber Effect */}
       <MatrixBackground enabled={gbSettings.matrixRainBg} color={THEMES[theme]?.accent || '#00ff66'} />
 
       {/* Top Header Bar */}
@@ -803,8 +794,6 @@ function App() {
         setTheme={setTheme}
         gbSettings={gbSettings}
         setGbSettings={setGbSettings}
-        isInspectorOpen={isInspectorOpen}
-        setIsInspectorOpen={setIsInspectorOpen}
         onLockApp={() => setIsAppLocked(true)}
         myProfile={myProfile}
         onOpenProfile={() => setShowProfileModal(true)}
@@ -845,7 +834,6 @@ function App() {
           onReactMessage={handleReactMessage}
           onDeleteForEveryone={handleDeleteForEveryone}
           onDeleteForMe={handleDeleteForMe}
-          onStartCall={(contact, type) => setCallActive({ contact, callType: type, isIncoming: false })}
           onUpdateContactDisappearing={handleUpdateContactDisappearing}
           onBurnShredMessage={handleBurnShredMessage}
           onOpenEncryptionModal={(c) => setEncryptionModalContact(c)}
@@ -857,23 +845,6 @@ function App() {
           gbSettings={gbSettings}
           onClearThread={handleClearThread}
           onBack={() => setActiveContactId(null)}
-        />
-
-        {/* Right Hacker Inspector & Console Drawer */}
-        <HackerInspector 
-          isOpen={isInspectorOpen}
-          onClose={() => setIsInspectorOpen(false)}
-          gbSettings={gbSettings}
-          setGbSettings={setGbSettings}
-          autoReplies={autoReplies}
-          setAutoReplies={setAutoReplies}
-          scheduledMessages={scheduledMessages}
-          setScheduledMessages={setScheduledMessages}
-          setTheme={setTheme}
-          contacts={contacts}
-          onBroadcastMessage={handleBroadcastMessage}
-          onClearAllData={handleClearAllData}
-          onSendMessageToContact={(cId, payload) => handleSendMessage(payload, cId)}
         />
 
       </div>
@@ -901,27 +872,7 @@ function App() {
         />
       )}
 
-      {/* 3. Incoming Call Ringing Alert */}
-      {incomingCallAlert && (
-        <IncomingCallAlert
-          callData={incomingCallAlert}
-          onAccept={handleAcceptIncomingCall}
-          onReject={handleRejectIncomingCall}
-        />
-      )}
-
-      {/* 4. Active Encrypted P2P Voice / Video WebRTC Call */}
-      {callActive && (
-        <CallModal
-          contact={callActive.contact}
-          callType={callActive.callType}
-          isIncoming={callActive.isIncoming}
-          incomingOffer={callActive.incomingOffer}
-          onClose={() => setCallActive(null)}
-        />
-      )}
-
-      {/* 5. Full-Screen Photo & Video Media Viewer / Lightbox */}
+      {/* 3. Full-Screen Photo & Video Media Viewer / Lightbox */}
       {mediaViewerItem && (
         <MediaViewerModal
           media={mediaViewerItem}
@@ -930,7 +881,7 @@ function App() {
         />
       )}
 
-      {/* 6. Media & Payload Vault Drawer */}
+      {/* 4. Media & Payload Vault Drawer */}
       {mediaVaultContact && (
         <MediaGalleryModal
           contact={mediaVaultContact}
@@ -940,7 +891,7 @@ function App() {
         />
       )}
 
-      {/* 7. E2EE Security & Safety Number Matrix Inspector */}
+      {/* 5. E2EE Security & Safety Number Matrix Inspector */}
       {encryptionModalContact && (
         <EncryptionModal
           myProfile={myProfile}
@@ -949,7 +900,7 @@ function App() {
         />
       )}
 
-      {/* 8. Message Forwarding Modal */}
+      {/* 6. Message Forwarding Modal */}
       {forwardingMessage && (
         <ForwardModal
           message={forwardingMessage}
@@ -959,7 +910,7 @@ function App() {
         />
       )}
 
-      {/* 9. Status / Story Viewer */}
+      {/* 7. Status / Story Viewer */}
       {activeStoryId && (
         <StatusViewerModal
           stories={stories}
@@ -970,7 +921,7 @@ function App() {
         />
       )}
 
-      {/* 10. Direct Message to Unsaved Username/IP */}
+      {/* 8. Direct Message to Unsaved Username/IP */}
       {showDirectChatModal && (
         <DirectChatModal
           onClose={() => setShowDirectChatModal(false)}
@@ -978,7 +929,7 @@ function App() {
         />
       )}
 
-      {/* 11. Mass Message Broadcast Blaster */}
+      {/* 9. Mass Message Broadcast Blaster */}
       {showBroadcastModal && (
         <BroadcastModal
           contacts={contacts}
@@ -987,7 +938,7 @@ function App() {
         />
       )}
 
-      {/* 12. Message Scheduler */}
+      {/* 10. Message Scheduler */}
       {showScheduleModal && (
         <ScheduleModal
           contacts={contacts}
@@ -997,7 +948,7 @@ function App() {
         />
       )}
 
-      {/* 13. Operator Profile & Multi-Device Pairing */}
+      {/* 11. Operator Profile & Multi-Device Pairing */}
       {showProfileModal && (
         <ProfileModal
           currentProfile={myProfile}
@@ -1010,7 +961,7 @@ function App() {
         />
       )}
 
-      {/* 14. Global Username Search Modal */}
+      {/* 12. Global Username Search Modal */}
       {showSearchUserModal && (
         <SearchUserModal
           currentProfile={myProfile}
@@ -1020,7 +971,7 @@ function App() {
         />
       )}
 
-      {/* 15. Delete Contact Confirmation Modal */}
+      {/* 13. Delete Contact Confirmation Modal */}
       {contactToDelete && (
         <div className="modal-backdrop" onClick={() => setContactToDelete(null)}>
           <div className="cyber-modal delete-contact-modal" onClick={(e) => e.stopPropagation()}>

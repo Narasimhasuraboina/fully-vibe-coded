@@ -505,51 +505,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  // 7. WebRTC Audio / Video Call Signaling
-  socket.on('call_offer', (data) => {
-    const sender = socket.userTag ? registeredUsers.get(normalizeTag(socket.userTag)) : null;
-    const cleanTargetTag = normalizeTag(data.targetTag);
-    const targetRoom = io.sockets.adapter.rooms.get(cleanTargetTag);
-
-    if (targetRoom && targetRoom.size > 0) {
-      io.to(cleanTargetTag).emit('incoming_call_signal', {
-        callerInfo: sanitizeUser(sender),
-        callType: data.callType,
-        offer: data.offer,
-      });
-    } else {
-      socket.emit('call_rejected_signal', { reason: 'PEER_UNREACHABLE_OR_OFFLINE' });
-    }
-  });
-
-  socket.on('call_answer', (data) => {
-    const cleanCallerTag = normalizeTag(data.callerTag);
-    io.to(cleanCallerTag).emit('call_answered_signal', {
-      answer: data.answer,
-    });
-  });
-
-  socket.on('ice_candidate', (data) => {
-    const cleanTargetTag = normalizeTag(data.targetTag);
-    io.to(cleanTargetTag).emit('ice_candidate_signal', {
-      candidate: data.candidate,
-      fromTag: socket.userTag,
-    });
-  });
-
-  socket.on('call_reject', (data) => {
-    const cleanCallerTag = normalizeTag(data.callerTag);
-    io.to(cleanCallerTag).emit('call_rejected_signal', {
-      reason: data.reason || 'CALL_DECLINED_BY_PEER',
-    });
-  });
-
-  socket.on('call_end', (data) => {
-    const cleanTargetTag = normalizeTag(data.targetTag);
-    io.to(cleanTargetTag).emit('call_ended_signal');
-  });
-
-  // 8. Disconnect Handler
+  // 7. Disconnect Handler
   socket.on('disconnect', () => {
     if (socket.userTag) {
       const tag = normalizeTag(socket.userTag);

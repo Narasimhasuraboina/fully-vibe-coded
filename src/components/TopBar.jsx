@@ -6,12 +6,9 @@ import {
   Volume2, 
   VolumeX, 
   Lock, 
-  Cpu, 
-  Wifi, 
+  Radio, 
   Palette, 
   Tv, 
-  Terminal,
-  Radio,
   LogOut,
   SlidersHorizontal
 } from 'lucide-react';
@@ -23,8 +20,6 @@ const TopBar = ({
   setTheme, 
   gbSettings, 
   setGbSettings, 
-  isInspectorOpen, 
-  setIsInspectorOpen,
   onLockApp,
   myProfile,
   onOpenProfile,
@@ -32,19 +27,17 @@ const TopBar = ({
   isRealtimeConnected
 }) => {
   const [time, setTime] = useState('');
-  const [cpuUsage, setCpuUsage] = useState(28);
-  const [latency, setLatency] = useState(14);
   const [themeDropdownOpen, setThemeDropdownOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const dropdownRef = useRef(null);
 
   useEffect(() => {
-    const timer = setInterval(() => {
+    const updateTime = () => {
       const now = new Date();
       setTime(now.toISOString().replace('T', ' ').substring(0, 19) + ' UTC');
-      setCpuUsage(Math.floor(20 + Math.random() * 25));
-      setLatency(Math.floor(10 + Math.random() * 8));
-    }, 1000);
+    };
+    updateTime();
+    const timer = setInterval(updateTime, 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -96,32 +89,19 @@ const TopBar = ({
         <div className="brand-logo">
           <div className="pulse-indicator active"></div>
           <span className="brand-title">CHATFORGE</span>
-          <span className="brand-badge hide-mobile">GB-CYBER v4.09</span>
+          <span className="brand-badge hide-mobile">E2EE MESSENGER</span>
         </div>
 
         {/* Realtime P2P Socket Status Tag */}
-        <div className={`realtime-status-pill ${isRealtimeConnected ? 'connected' : 'offline'}`} title={isRealtimeConnected ? 'Real-time WebSocket P2P Relay Active' : 'Connecting to Relay Server...'}>
+        <div className={`realtime-status-pill ${isRealtimeConnected ? 'connected' : 'offline'}`} title={isRealtimeConnected ? 'Real-time WebSocket Relay Active' : 'Connecting to Relay Server...'}>
           <Radio size={12} className={isRealtimeConnected ? 'animate-pulse text-accent' : 'text-muted'} />
           <span className="hide-mobile">{isRealtimeConnected ? 'MESH ONLINE' : 'LOCAL STANDBY'}</span>
           <span className="show-mobile-inline">{isRealtimeConnected ? 'ONLINE' : 'OFFLINE'}</span>
         </div>
 
-        <div className="sys-metric hide-mobile">
-          <Cpu size={13} className="text-accent" />
-          <span>CPU: {cpuUsage}%</span>
-          <div className="metric-bar">
-            <div className="metric-fill" style={{ width: `${cpuUsage}%` }}></div>
-          </div>
-        </div>
-
-        <div className="sys-metric hide-mobile">
-          <Wifi size={13} className="text-accent" />
-          <span>LATENCY: {latency}ms</span>
-        </div>
-
         <div className="security-tag hide-mobile">
           <Shield size={13} className="text-accent" />
-          <span>RSA-4096 P2P</span>
+          <span>AES-256 GCM P2P</span>
         </div>
       </div>
 
@@ -137,7 +117,7 @@ const TopBar = ({
         <button 
           className="cyber-btn btn-profile-tag"
           onClick={() => { soundFX.playKeypress(); onOpenProfile(); }}
-          title="Multi-Device Pairing & Operator Handle"
+          title="Operator Handle & Profile Settings"
         >
           <img src={myProfile?.avatar} alt="Profile" className="topbar-avatar" />
           <span className="profile-handle-text">{myProfile?.username}</span>
@@ -158,7 +138,7 @@ const TopBar = ({
         <button 
           className={`cyber-btn btn-icon hide-on-mobile ${gbSettings.soundEffects ? 'active' : ''}`}
           onClick={toggleAudio}
-          title="Toggle Cyber Sound FX"
+          title="Toggle Sound Effects"
         >
           {gbSettings.soundEffects ? <Volume2 size={15} /> : <VolumeX size={15} />}
         </button>
@@ -180,29 +160,31 @@ const TopBar = ({
               setThemeDropdownOpen(!themeDropdownOpen);
               setMobileMenuOpen(false);
             }}
-            title="Change Cyberpunk Theme"
+            title="Change Cyberpunk & Aesthetic Theme"
           >
             <Palette size={15} />
           </button>
 
           {themeDropdownOpen && (
             <div className="theme-dropdown">
-              <div className="dropdown-header">CYBER THEMES</div>
-              {Object.values(THEMES).map((t) => (
-                <button
-                  key={t.id}
-                  className={`theme-option ${theme === t.id ? 'selected' : ''}`}
-                  onClick={() => {
-                    soundFX.playKeypress();
-                    setTheme(t.id);
-                    setGbSettings(prev => ({ ...prev, theme: t.id }));
-                    setThemeDropdownOpen(false);
-                  }}
-                >
-                  <span className="theme-color-preview" style={{ background: t.accent }}></span>
-                  <span>{t.name}</span>
-                </button>
-              ))}
+              <div className="dropdown-header">THEME COLOR MATRIX</div>
+              <div className="theme-options-list">
+                {Object.values(THEMES).map((t) => (
+                  <button
+                    key={t.id}
+                    className={`theme-option ${theme === t.id ? 'selected' : ''}`}
+                    onClick={() => {
+                      soundFX.playKeypress();
+                      setTheme(t.id);
+                      setGbSettings(prev => ({ ...prev, theme: t.id }));
+                      setThemeDropdownOpen(false);
+                    }}
+                  >
+                    <span className="theme-color-preview" style={{ background: t.accent, boxShadow: `0 0 6px ${t.accent}` }}></span>
+                    <span className="theme-name-text">{t.name}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -226,22 +208,9 @@ const TopBar = ({
             soundFX.playGlitchAlarm();
             onLogout();
           }}
-          title="Logout / Disconnect Node Identity"
+          title="Logout / Disconnect Identity"
         >
           <LogOut size={15} />
-        </button>
-
-        {/* Inspector / Console Drawer Trigger */}
-        <button 
-          className={`cyber-btn btn-inspector-toggle ${isInspectorOpen ? 'active' : ''}`}
-          onClick={() => {
-            soundFX.playKeypress();
-            setIsInspectorOpen(!isInspectorOpen);
-          }}
-          title="Open Hacker Console & GB-Mods Inspector"
-        >
-          <Terminal size={15} />
-          <span className="hide-mobile">CONSOLE & MODS</span>
         </button>
 
         {/* Mobile Quick Settings & Tools Dropdown Button */}
@@ -253,14 +222,14 @@ const TopBar = ({
               setMobileMenuOpen(!mobileMenuOpen);
               setThemeDropdownOpen(false);
             }}
-            title="Cyber Tools & Security Settings"
+            title="Quick Settings & Themes"
           >
             <SlidersHorizontal size={15} />
           </button>
 
           {mobileMenuOpen && (
             <div className="mobile-tools-dropdown">
-              <div className="dropdown-header">CYBER MODS & TOOLS</div>
+              <div className="dropdown-header">QUICK CONTROLS</div>
               
               <button 
                 className={`mobile-tool-opt ${isGhost ? 'active' : ''}`}
@@ -275,7 +244,7 @@ const TopBar = ({
                 onClick={() => { toggleAudio(); }}
               >
                 {gbSettings.soundEffects ? <Volume2 size={14} className="text-accent" /> : <VolumeX size={14} />}
-                <span>CYBER SOUND FX: {gbSettings.soundEffects ? 'ON' : 'MUTED'}</span>
+                <span>SOUND FX: {gbSettings.soundEffects ? 'ON' : 'MUTED'}</span>
               </button>
 
               <button 
@@ -307,7 +276,7 @@ const TopBar = ({
                 }}
               >
                 <LogOut size={14} className="text-danger" />
-                <span>LOGOUT / EXIT OPERATOR</span>
+                <span>LOGOUT / EXIT</span>
               </button>
             </div>
           )}

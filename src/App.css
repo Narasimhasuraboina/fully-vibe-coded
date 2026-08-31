@@ -221,19 +221,39 @@
   right: 0;
   background: var(--bg-card);
   border: 1px solid var(--border-active);
-  border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.8);
-  width: 180px;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.85), 0 0 15px var(--accent-glow);
+  width: 220px;
   z-index: 50;
   padding: 6px 0;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.theme-options-list {
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-active) transparent;
+}
+
+.theme-options-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.theme-options-list::-webkit-scrollbar-thumb {
+  background: var(--border-active);
+  border-radius: 4px;
 }
 
 .dropdown-header {
   font-size: 10px;
-  padding: 4px 10px;
-  color: var(--text-muted);
+  font-weight: 700;
+  padding: 6px 12px;
+  color: var(--accent);
   border-bottom: 1px solid var(--border);
-  letter-spacing: 1px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
 }
 
 .theme-option {
@@ -245,24 +265,40 @@
   font-size: 12px;
   color: var(--text-main);
   text-align: left;
-  transition: background 0.15s;
+  transition: all 0.15s ease;
+  border-left: 2px solid transparent;
 }
 
 .theme-option:hover {
   background: var(--bg-card-hover);
   color: var(--accent);
+  border-left-color: var(--accent);
+  padding-left: 15px;
 }
 
 .theme-option.selected {
   color: var(--accent);
   font-weight: bold;
+  background: rgba(255, 255, 255, 0.04);
+  border-left-color: var(--accent);
 }
 
 .theme-color-preview {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.2);
 }
+
+.theme-name-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+
 
 /* MAIN LAYOUT SPLIT */
 .chatforge-main-layout {
