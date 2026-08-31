@@ -12,7 +12,7 @@ const PRESET_AVATARS = [
 ];
 
 const ProfileModal = ({ currentProfile, onSaveProfile, onClose, serverInfo }) => {
-  const [username, setUsername] = useState(currentProfile.username || 'Operator_Zero');
+  const username = currentProfile.username || 'Operator_Zero';
   const [avatar, setAvatar] = useState(currentProfile.avatar || PRESET_AVATARS[0]);
   const [customStatus, setCustomStatus] = useState(currentProfile.customStatus || 'Active Node on Mesh Network');
 
@@ -21,10 +21,8 @@ const ProfileModal = ({ currentProfile, onSaveProfile, onClose, serverInfo }) =>
     if (!username.trim()) return;
 
     soundFX.playSent();
-    const tag = `@${username.trim().toLowerCase().replace(/\s+/g, '_')}`;
     onSaveProfile({
-      username: username.trim(),
-      tag,
+      ...currentProfile,
       avatar,
       customStatus: customStatus.trim(),
     });
@@ -78,9 +76,8 @@ const ProfileModal = ({ currentProfile, onSaveProfile, onClose, serverInfo }) =>
               <input
                 type="text"
                 value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="e.g. Neo, Trinity, ZeroCool"
-                required
+                readOnly
+                title="Username changes require creating a new account."
                 className="cyber-input"
               />
             </div>

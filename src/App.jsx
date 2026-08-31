@@ -2,14 +2,10 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
 import { THEMES } from './themes';
 import { 
-  INITIAL_CONTACTS, 
-  INITIAL_MESSAGES, 
-  INITIAL_STORIES, 
   INITIAL_AUTO_REPLIES, 
-  INITIAL_SCHEDULED, 
   DEFAULT_GB_SETTINGS 
 } from './services/mockData';
-import { loadState, saveState } from './services/storage';
+import { loadState, saveState, loadAccountState, saveAccountState } from './services/storage';
 import { soundFX } from './services/audioService';
 import { socketService } from './services/socketService';
 import { notificationService } from './services/notificationService';
@@ -33,6 +29,11 @@ import EncryptionModal from './components/EncryptionModal';
 import ForwardModal from './components/ForwardModal';
 import ToastNotification from './components/ToastNotification';
 import { Trash2, X } from 'lucide-react';
+
+const EMPTY_CONTACTS = [];
+const EMPTY_MESSAGES = {};
+const EMPTY_STORIES = [];
+const EMPTY_SCHEDULED = [];
 
 function createMessageObject(payload, isUser = true, hideSecondTick = false) {
   const timeNow = Date.now();
@@ -64,16 +65,18 @@ function createMessageObject(payload, isUser = true, hideSecondTick = false) {
 function App() {
   // Current User Identity (Login Required)
   const [myProfile, setMyProfile] = useState(() => loadState('my_profile', null));
+  const [workspaceTag, setWorkspaceTag] = useState(() => myProfile?.tag || null);
+  const accountTag = myProfile?.tag || null;
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [serverInfo, setServerInfo] = useState(null);
 
   // State Initialization
-  const [contacts, setContacts] = useState(() => loadState('contacts', INITIAL_CONTACTS));
-  const [messages, setMessages] = useState(() => loadState('messages', INITIAL_MESSAGES));
-  const [stories] = useState(() => loadState('stories', INITIAL_STORIES));
-  const [autoReplies] = useState(() => loadState('auto_replies', INITIAL_AUTO_REPLIES));
-  const [scheduledMessages, setScheduledMessages] = useState(() => loadState('scheduled', INITIAL_SCHEDULED));
-  const [gbSettings, setGbSettings] = useState(() => loadState('gb_settings', DEFAULT_GB_SETTINGS));
+  const [contacts, setContacts] = useState(() => loadAccountState(myProfile, 'contacts', EMPTY_CONTACTS));
+  const [messages, setMessages] = useState(() => loadAccountState(myProfile, 'messages', EMPTY_MESSAGES));
+  const [stories, setStories] = useState(() => loadAccountState(myProfile, 'stories', EMPTY_STORIES));
+  const [autoReplies, setAutoReplies] = useState(() => loadAccountState(myProfile, 'auto_replies', INITIAL_AUTO_REPLIES));
+  const [scheduledMessages, setScheduledMessages] = useState(() => loadAccountState(myProfile, 'scheduled', EMPTY_SCHEDULED));
+  const [gbSettings, setGbSettings] = useState(() => loadAccountState(myProfile, 'gb_settings', DEFAULT_GB_SETTINGS));
   const [theme, setTheme] = useState(() => gbSettings.theme || 'matrix');
 
   // Active Context State (Mobile starts at contact list if screen is small)
@@ -81,7 +84,7 @@ function App() {
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
       return null;
     }
-    const savedContacts = loadState('contacts', INITIAL_CONTACTS);
+    const savedContacts = loadAccountState(myProfile, 'contacts', EMPTY_CONTACTS);
     return savedContacts[0]?.id || null;
   });
   const [typingStatus, setTypingStatus] = useState({}); // { [contactId]: boolean }
@@ -121,14 +124,30 @@ function App() {
     }
   }, [myProfile]);
 
-  // Sync state to LocalStorage
+  const activateProfile = (profile) => {
+    const nextContacts = loadAccountState(profile, 'contacts', EMPTY_CONTACTS);
+    const nextSettings = loadAccountState(profile, 'gb_settings', DEFAULT_GB_SETTINGS);
+    setContacts(nextContacts);
+    setMessages(loadAccountState(profile, 'messages', EMPTY_MESSAGES));
+    setStories(loadAccountState(profile, 'stories', EMPTY_STORIES));
+    setAutoReplies(loadAccountState(profile, 'auto_replies', INITIAL_AUTO_REPLIES));
+    setScheduledMessages(loadAccountState(profile, 'scheduled', EMPTY_SCHEDULED));
+    setGbSettings(nextSettings);
+    setTheme(nextSettings.theme || 'matrix');
+    setActiveContactId(typeof window !== 'undefined' && window.innerWidth < 768 ? null : nextContacts[0]?.id || null);
+    setTypingStatus({});
+    setWorkspaceTag(profile.tag);
+    setMyProfile(profile);
+  };
+
+  // Sync each local workspace to its authenticated account only.
   useEffect(() => saveState('my_profile', myProfile), [myProfile]);
-  useEffect(() => saveState('contacts', contacts), [contacts]);
-  useEffect(() => saveState('messages', messages), [messages]);
-  useEffect(() => saveState('stories', stories), [stories]);
-  useEffect(() => saveState('auto_replies', autoReplies), [autoReplies]);
-  useEffect(() => saveState('scheduled', scheduledMessages), [scheduledMessages]);
-  useEffect(() => saveState('gb_settings', gbSettings), [gbSettings]);
+  useEffect(() => { if (workspaceTag === accountTag) saveAccountState(accountTag, 'contacts', contacts); }, [workspaceTag, accountTag, contacts]);
+  useEffect(() => { if (workspaceTag === accountTag) saveAccountState(accountTag, 'messages', messages); }, [workspaceTag, accountTag, messages]);
+  useEffect(() => { if (workspaceTag === accountTag) saveAccountState(accountTag, 'stories', stories); }, [workspaceTag, accountTag, stories]);
+  useEffect(() => { if (workspaceTag === accountTag) saveAccountState(accountTag, 'auto_replies', autoReplies); }, [workspaceTag, accountTag, autoReplies]);
+  useEffect(() => { if (workspaceTag === accountTag) saveAccountState(accountTag, 'scheduled', scheduledMessages); }, [workspaceTag, accountTag, scheduledMessages]);
+  useEffect(() => { if (workspaceTag === accountTag) saveAccountState(accountTag, 'gb_settings', gbSettings); }, [workspaceTag, accountTag, gbSettings]);
 
   // Apply Theme CSS variables dynamically
   useEffect(() => {
@@ -569,6 +588,7 @@ function App() {
   // Logout Handler
   const handleLogout = () => {
     socketService.disconnect();
+    setWorkspaceTag(null);
     setMyProfile(null);
     localStorage.removeItem('chatforge_my_profile');
     setIsRealtimeConnected(false);
@@ -672,7 +692,7 @@ function App() {
     dispatchDueMessages();
     const interval = setInterval(dispatchDueMessages, 10000);
     return () => clearInterval(interval);
-  }, [scheduledMessages]);
+  }, [scheduledMessages, workspaceTag, accountTag]);
 
   // Message Reaction Handler
   const handleReactMessage = (messageId, emoji) => {
@@ -822,7 +842,7 @@ function App() {
     return (
       <div className={`chatforge-app-root ${gbSettings.scanlinesEnabled ? 'crt-scanlines' : ''}`}>
         <MatrixBackground enabled={true} color={THEMES[theme]?.accent || '#00ff66'} />
-        <LoginScreen onLogin={(prof) => setMyProfile(prof)} serverInfo={serverInfo} />
+        <LoginScreen onLogin={activateProfile} serverInfo={serverInfo} />
       </div>
     );
   }

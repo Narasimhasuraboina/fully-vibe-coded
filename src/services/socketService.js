@@ -283,9 +283,15 @@ class RealtimeSocketService {
   }
 
   // SENDER-SIDE OFFLINE OUTBOX STORAGE (Zero Server Knowledge)
+  getOutboxStorageKey() {
+    const tag = this.currentProfile?.tag || this.currentProfile?.username || 'anonymous';
+    const safeTag = String(tag).trim().toLowerCase().replace(/[^a-z0-9_@-]/g, '_');
+    return `chatforge_account_${safeTag}_offline_outbox`;
+  }
+
   getOutbox() {
     try {
-      const raw = localStorage.getItem('chatforge_offline_outbox');
+      const raw = localStorage.getItem(this.getOutboxStorageKey());
       return raw ? JSON.parse(raw) : [];
     } catch {
       return [];
@@ -305,7 +311,7 @@ class RealtimeSocketService {
       // Prevent duplicates
       const filtered = outbox.filter(item => item.id !== message.id);
       filtered.push(entry);
-      localStorage.setItem('chatforge_offline_outbox', JSON.stringify(filtered));
+      localStorage.setItem(this.getOutboxStorageKey(), JSON.stringify(filtered));
       console.log(`[OUTBOX] Message ${message.id} queued in sender local storage for offline peer ${cleanTag}`);
     } catch (e) {
       console.error('[OUTBOX] Error saving to outbox', e);
@@ -316,7 +322,7 @@ class RealtimeSocketService {
     try {
       const outbox = this.getOutbox();
       const filtered = outbox.filter(item => item.id !== messageId);
-      localStorage.setItem('chatforge_offline_outbox', JSON.stringify(filtered));
+      localStorage.setItem(this.getOutboxStorageKey(), JSON.stringify(filtered));
     } catch (e) {
       console.error('[OUTBOX] Error removing from outbox', e);
     }
