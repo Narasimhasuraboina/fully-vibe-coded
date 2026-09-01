@@ -1,1 +1,11 @@
-{}
+{
+  "@alicev2": {
+    "username": "AliceV2",
+    "tag": "@alicev2",
+    "passwordHash": "6668bbc4f3bd53f2c236be7ea02b2e84e92d7aa9234f2ba95c639a3093d2d6ec",
+    "avatar": "http://avatar.com/alice",
+    "customStatus": "Testing V2",
+    "registeredAt": 1788239103110,
+    "lastSeen": "online"
+  }
+}
