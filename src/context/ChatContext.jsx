@@ -3,6 +3,7 @@ import { ChatContext } from './ChatContextInstance';
 import { THEMES } from '../themes';
 import { socketService } from '../services/socketService';
 import { soundFX } from '../services/audioService';
+import { notificationService } from '../services/notificationService';
 import { loadState, saveState, loadAccountState, saveAccountState } from '../services/storage';
 
 const DEFAULT_GB_SETTINGS = {
@@ -36,7 +37,16 @@ export const ChatProvider = ({ children }) => {
     currentUser ? loadAccountState(currentUser, 'messages', {}) : {}
   );
 
-  // 6. UI Transients
+  // 6. Scheduled Messages Store
+  const [scheduledMessages, setScheduledMessages] = useState(() => 
+    currentUser ? loadAccountState(currentUser, 'scheduled', []) : []
+  );
+
+  // 7. Modal Management
+  const [activeModal, setActiveModal] = useState(null); // 'broadcast' | 'schedule' | 'encryption' | 'gallery' | 'mediaViewer' | 'forward' | 'profile'
+  const [modalData, setModalData] = useState(null);
+
+  // 8. UI Transients
   const [typingStatus, setTypingStatus] = useState({}); // { [contactId]: boolean }
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -99,6 +109,12 @@ export const ChatProvider = ({ children }) => {
 
   useEffect(() => {
     if (currentUser) {
+      saveAccountState(currentUser, 'scheduled', scheduledMessages);
+    }
+  }, [scheduledMessages, currentUser]);
+
+  useEffect(() => {
+    if (currentUser) {
       saveAccountState(currentUser, 'gb_settings', settings);
     }
   }, [settings, currentUser]);
@@ -109,6 +125,17 @@ export const ChatProvider = ({ children }) => {
     setThemeState(newTheme);
     setSettings((prev) => ({ ...prev, theme: newTheme }));
   };
+
+  // Modal Open/Close Helpers
+  const openModal = useCallback((modalName, data = null) => {
+    setActiveModal(modalName);
+    setModalData(data);
+  }, []);
+
+  const closeModal = useCallback(() => {
+    setActiveModal(null);
+    setModalData(null);
+  }, []);
 
   // Active Contact Object
   const activeContact = useMemo(() => {
@@ -245,6 +272,19 @@ export const ChatProvider = ({ children }) => {
           };
         });
 
+        // Trigger in-app toast notification & desktop alert
+        const previewText = message.text || (message.file ? `[Attachment: ${message.file.name}]` : 'Encrypted Signal');
+        notificationService.pushToast({
+          title: `INCOMING SIGNAL // ${senderTag}`,
+          message: previewText,
+          avatar: message.senderAvatar,
+          type: 'info',
+          onClick: () => selectContact(contactId),
+        });
+        notificationService.showDesktopNotification(`Signal from ${senderTag}`, {
+          body: previewText,
+        });
+
         // Send delivery receipt back to sender
         socketService.emitDeliveryReceipt(message.id, senderTag);
       },
@@ -308,7 +348,7 @@ export const ChatProvider = ({ children }) => {
         });
       },
     });
-  }, []);
+  }, [selectContact]);
 
   // Connect socket on mount or when user changes
   useEffect(() => {
@@ -326,9 +366,11 @@ export const ChatProvider = ({ children }) => {
     const loadedContacts = loadAccountState(profile, 'contacts', []);
     const loadedMessages = loadAccountState(profile, 'messages', {});
     const loadedSettings = loadAccountState(profile, 'gb_settings', DEFAULT_GB_SETTINGS);
+    const loadedScheduled = loadAccountState(profile, 'scheduled', []);
 
     setContacts(loadedContacts);
     setMessages(loadedMessages);
+    setScheduledMessages(loadedScheduled);
     setSettings(loadedSettings);
     setThemeState(loadedSettings.theme || 'matrix');
     setActiveContactId(loadedContacts[0]?.id || null);
@@ -343,6 +385,7 @@ export const ChatProvider = ({ children }) => {
     setActiveContactId(null);
     setContacts([]);
     setMessages({});
+    setScheduledMessages([]);
     setIsConnected(false);
     localStorage.removeItem('chatforge_my_profile');
   };
@@ -365,7 +408,15 @@ export const ChatProvider = ({ children }) => {
       type: payload.type || 'text',
       file: payload.file || null,
       audioUrl: payload.audioUrl || null,
+      mediaUrl: payload.mediaUrl || payload.file?.data || payload.file?.url || null,
+      code: payload.code || null,
+      language: payload.language || null,
+      fileName: payload.fileName || payload.file?.name || null,
+      fileSize: payload.fileSize || payload.file?.size || null,
+      audioDuration: payload.audioDuration || null,
       replyTo: payload.replyTo || null,
+      burnAfterRead: payload.burnAfterRead || false,
+      burnCountdown: payload.burnCountdown || null,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       status: 'sent',
       reactions: {},
@@ -389,6 +440,108 @@ export const ChatProvider = ({ children }) => {
     // Relay over Socket.io
     socketService.sendMessage(targetContact.tag, newMsg);
   }, [activeContactId, currentUser, contacts]);
+
+  // Mass Broadcast Blaster
+  const broadcastMessage = useCallback((text, targetContactIds) => {
+    if (!text || !targetContactIds || targetContactIds.length === 0) return;
+    targetContactIds.forEach((cId) => {
+      sendMessage({ text, type: 'text' }, cId);
+    });
+    notificationService.pushToast({
+      title: 'BROADCAST DISPATCHED',
+      message: `Mass broadcast sent to ${targetContactIds.length} recipient node(s).`,
+      type: 'success',
+    });
+  }, [sendMessage]);
+
+  // Forward Encrypted Message
+  const forwardMessage = useCallback((targetContactIds = [], customTag = '') => {
+    if (!modalData) return;
+    const msg = modalData;
+    const cleanPayload = {
+      text: msg.text,
+      type: msg.type || 'text',
+      file: msg.file,
+      audioUrl: msg.audioUrl,
+      mediaUrl: msg.mediaUrl,
+      code: msg.code,
+      language: msg.language,
+      fileName: msg.fileName,
+      fileSize: msg.fileSize,
+    };
+
+    targetContactIds.forEach((cId) => {
+      sendMessage(cleanPayload, cId);
+    });
+
+    if (customTag && customTag.trim()) {
+      const cleanCustom = customTag.trim().startsWith('@') ? customTag.trim() : `@${customTag.trim()}`;
+      let contact = contacts.find((c) => c.tag?.toLowerCase() === cleanCustom.toLowerCase());
+      if (!contact) {
+        contact = {
+          id: `peer_${cleanCustom.replace(/^@/, '').toLowerCase()}`,
+          name: cleanCustom.replace(/^@/, ''),
+          tag: cleanCustom,
+          avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+          status: 'offline',
+          lastSeen: 'offline',
+          unreadCount: 0,
+        };
+        setContacts((prev) => [contact, ...prev]);
+      }
+      sendMessage(cleanPayload, contact.id);
+    }
+
+    notificationService.pushToast({
+      title: 'PAYLOAD FORWARDED',
+      message: `Forwarded to ${targetContactIds.length + (customTag ? 1 : 0)} destination node(s).`,
+      type: 'success',
+    });
+  }, [modalData, contacts, sendMessage]);
+
+  // Schedule Message
+  const scheduleMessage = useCallback((item) => {
+    setScheduledMessages((prev) => [...prev, item]);
+    notificationService.pushToast({
+      title: 'TRANSMISSION QUEUED',
+      message: `Scheduled for ${item.scheduledTime} to ${item.contactName}`,
+      type: 'info',
+    });
+  }, []);
+
+  const deleteScheduledMessage = useCallback((id) => {
+    setScheduledMessages((prev) => prev.filter((s) => s.id !== id));
+  }, []);
+
+  // Background Dispatcher for Scheduled Messages (checks every 1s)
+  useEffect(() => {
+    if (!currentUser || scheduledMessages.length === 0) return;
+    const interval = setInterval(() => {
+      const now = new Date();
+      const localHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const utcHHMM = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`;
+
+      setScheduledMessages((prev) => {
+        let hasDispatched = false;
+        const updated = prev.map((item) => {
+          if (item.status === 'pending' && (item.scheduledTime === localHHMM || item.scheduledTime === utcHHMM)) {
+            hasDispatched = true;
+            sendMessage({ text: item.message, type: 'text' }, item.contactId);
+            notificationService.pushToast({
+              title: 'SCHEDULE DISPATCHED',
+              message: `Auto-delivered scheduled transmission to ${item.contactName || 'Node'}`,
+              type: 'success',
+            });
+            return { ...item, status: 'dispatched' };
+          }
+          return item;
+        });
+        return hasDispatched ? updated : prev;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [currentUser, scheduledMessages, sendMessage]);
 
   // React to Message
   const reactMessage = useCallback((messageId, emoji) => {
@@ -428,12 +581,48 @@ export const ChatProvider = ({ children }) => {
     }
   }, [activeContactId, contacts]);
 
+  // Shred / Burn Message
+  const shredMessage = useCallback((messageId) => {
+    if (!activeContactId) return;
+    const targetContact = contacts.find((c) => c.id === activeContactId);
+    soundFX.playGlitchAlarm();
+
+    setMessages((prev) => {
+      const currentList = prev[activeContactId] || [];
+      return {
+        ...prev,
+        [activeContactId]: currentList.filter((m) => m.id !== messageId),
+      };
+    });
+
+    if (targetContact) {
+      socketService.emitMessageShred(messageId, targetContact.tag);
+    }
+  }, [activeContactId, contacts]);
+
   // Clear thread
   const clearChat = useCallback((contactId) => {
     const id = contactId || activeContactId;
     if (!id) return;
     setMessages((prev) => ({ ...prev, [id]: [] }));
   }, [activeContactId]);
+
+  // Update Profile
+  const updateProfile = useCallback((updatedProfile) => {
+    setCurrentUser(updatedProfile);
+    saveState('my_profile', updatedProfile);
+    if (isConnected) {
+      socketService.emit('update_profile', {
+        avatar: updatedProfile.avatar,
+        customStatus: updatedProfile.customStatus,
+      });
+    }
+    notificationService.pushToast({
+      title: 'PROFILE UPDATED',
+      message: 'Operator identity and status synced across mesh.',
+      type: 'success',
+    });
+  }, [isConnected]);
 
   // Emit typing indicator
   const emitTyping = useCallback((isTyping) => {
@@ -458,6 +647,13 @@ export const ChatProvider = ({ children }) => {
     addOrSelectContact,
     messages: messages[activeContactId] || [],
     allMessages: messages,
+    scheduledMessages,
+    scheduleMessage,
+    deleteScheduledMessage,
+    broadcastMessage,
+    forwardMessage,
+    updateProfile,
+    shredMessage,
     sendMessage,
     reactMessage,
     deleteMessage,
@@ -466,6 +662,10 @@ export const ChatProvider = ({ children }) => {
     emitTyping,
     searchQuery,
     setSearchQuery,
+    activeModal,
+    modalData,
+    openModal,
+    closeModal,
   };
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

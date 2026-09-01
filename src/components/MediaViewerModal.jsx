@@ -55,10 +55,12 @@ const MediaViewerModal = ({ media, onClose, onBurnShred }) => {
     }
   }, [burnCount, media, onBurnShred, onClose]);
 
+  const mediaSrc = media?.mediaUrl || media?.file?.data || media?.file?.url || media?.data || media?.url || media?.text || '';
+
   const handleDownload = () => {
     soundFX.playSent();
     const a = document.createElement('a');
-    a.href = media.mediaUrl || media.text;
+    a.href = mediaSrc;
     a.download = media.fileName || `chatforge_media_${Date.now()}.${media.type === 'video' ? 'mp4' : 'png'}`;
     document.body.appendChild(a);
     a.click();
@@ -186,7 +188,7 @@ const MediaViewerModal = ({ media, onClose, onBurnShred }) => {
             <div className="video-player-box">
               <video
                 ref={videoRef}
-                src={media.mediaUrl}
+                src={mediaSrc}
                 autoPlay
                 playsInline
                 muted={isMuted}
@@ -216,7 +218,7 @@ const MediaViewerModal = ({ media, onClose, onBurnShred }) => {
                 </div>
 
                 <button 
-                  className="ctrl-btn"
+                  className="ctrl-btn" 
                   onClick={() => {
                     setIsMuted(!isMuted);
                     if (videoRef.current) videoRef.current.muted = !isMuted;
@@ -242,7 +244,7 @@ const MediaViewerModal = ({ media, onClose, onBurnShred }) => {
           ) : (
             <div className="image-viewer-stage">
               <img
-                src={media.mediaUrl}
+                src={mediaSrc}
                 alt="Encrypted payload"
                 className="viewer-img-elem"
                 style={{

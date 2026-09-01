@@ -1,12 +1,23 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Terminal, Shield, LogOut, Palette, ChevronDown, Check } from 'lucide-react';
+import { Terminal, Shield, LogOut, Palette, ChevronDown, Check, Radio, Calendar } from 'lucide-react';
 import { useChat } from '../../context/useChat';
 import { THEMES } from '../../themes';
 
 export const Header = () => {
-  const { currentUser, logout, theme, setTheme, isConnected, serverInfo } = useChat();
+  const { 
+    currentUser, 
+    logout, 
+    theme, 
+    setTheme, 
+    isConnected, 
+    serverInfo,
+    openModal,
+    scheduledMessages,
+  } = useChat();
   const [showThemePicker, setShowThemePicker] = useState(false);
   const dropdownRef = useRef(null);
+
+  const pendingScheduledCount = scheduledMessages.filter(s => s.status === 'pending').length;
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -44,8 +55,35 @@ export const Header = () => {
         <span className="text-muted text-xs">PORT {serverInfo.port || 3001}</span>
       </div>
 
-      {/* Right Controls: Theme Picker & Profile */}
+      {/* Right Controls: Quick Tools, Theme Picker & Profile */}
       <div className="topbar-right">
+        {/* Mass Broadcast Blaster Action */}
+        <button
+          type="button"
+          className="cyber-btn"
+          onClick={() => openModal('broadcast')}
+          title="Mass Broadcast Blaster"
+        >
+          <Radio size={14} className="text-accent" />
+          <span className="hidden sm:inline">BROADCAST</span>
+        </button>
+
+        {/* Scheduled Dispatcher Action */}
+        <button
+          type="button"
+          className="cyber-btn relative"
+          onClick={() => openModal('schedule')}
+          title="Scheduled Transmissions"
+        >
+          <Calendar size={14} className="text-accent" />
+          <span className="hidden sm:inline">SCHEDULE</span>
+          {pendingScheduledCount > 0 && (
+            <span className="unread-badge animate-pulse" style={{ position: 'relative', top: 'auto', right: 'auto', marginLeft: '4px' }}>
+              {pendingScheduledCount}
+            </span>
+          )}
+        </button>
+
         {/* 12-Theme Selector Dropdown */}
         <div className="theme-selector-wrapper" ref={dropdownRef}>
           <button
@@ -86,14 +124,19 @@ export const Header = () => {
         {/* User Profile Pill */}
         {currentUser && (
           <div className="flex items-center gap-2">
-            <div className="cyber-btn btn-profile-tag" title={`Logged in as ${currentUser.username}`}>
+            <button
+              type="button"
+              className="cyber-btn btn-profile-tag"
+              onClick={() => openModal('profile')}
+              title={`Logged in as ${currentUser.username} - Click to view/edit identity`}
+            >
               <img
                 src={currentUser.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80'}
                 alt={currentUser.username}
                 className="topbar-avatar"
               />
               <span className="profile-handle-text">{currentUser.tag || `@${currentUser.username}`}</span>
-            </div>
+            </button>
 
             <button
               type="button"

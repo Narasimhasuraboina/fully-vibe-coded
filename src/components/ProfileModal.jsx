@@ -12,9 +12,9 @@ const PRESET_AVATARS = [
 ];
 
 const ProfileModal = ({ currentProfile, onSaveProfile, onClose, serverInfo }) => {
-  const username = currentProfile.username || 'Operator_Zero';
-  const [avatar, setAvatar] = useState(currentProfile.avatar || PRESET_AVATARS[0]);
-  const [customStatus, setCustomStatus] = useState(currentProfile.customStatus || 'Active Node on Mesh Network');
+  const username = currentProfile?.username || currentProfile?.name || 'Operator_Zero';
+  const [avatar, setAvatar] = useState(currentProfile?.avatar || PRESET_AVATARS[0]);
+  const [customStatus, setCustomStatus] = useState(currentProfile?.customStatus || 'Active Node on Mesh Network');
 
   const handleSubmit = (e) => {
     e.preventDefault();
