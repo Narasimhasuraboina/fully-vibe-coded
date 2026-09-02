@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, UserPlus, Radio, MessageSquare, X } from 'lucide-react';
+import { Search, UserPlus, Radio, MessageSquare, X, Check, CheckCheck, Pin } from 'lucide-react';
 import { useChat } from '../../context/useChat';
 import { socketService } from '../../services/socketService';
 import { soundFX } from '../../services/audioService';
@@ -12,6 +12,7 @@ export const Sidebar = () => {
     addOrSelectContact,
     allMessages,
     typingStatus,
+    allPinnedMessageIds = {},
   } = useChat();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -163,20 +164,40 @@ export const Sidebar = () => {
               {/* Chat Info */}
               <div className="chat-info">
                 <div className="chat-info-top">
-                  <span className="contact-name">{contact.name || contact.tag}</span>
+                  <span className="contact-name flex items-center gap-1.5">
+                    <span className="truncate">{contact.name || contact.tag}</span>
+                    {(allPinnedMessageIds[contact.id] || []).length > 0 && (
+                      <Pin size={10} className="text-accent fill-accent flex-shrink-0" />
+                    )}
+                  </span>
                   {lastMsg && (
                     <span className="last-message-time">{lastMsg.timestamp}</span>
                   )}
                 </div>
 
                 <div className="chat-info-bottom">
-                  <span className="last-message-text">
+                  <span className="last-message-text flex items-center gap-1 overflow-hidden">
                     {isContactTyping ? (
                       <span className="text-accent flex items-center gap-1">
                         <Radio size={11} className="animate-pulse" /> typing...
                       </span>
                     ) : lastMsg ? (
-                      lastMsg.text || (lastMsg.file ? '📁 File attachment' : 'Encrypted message')
+                      <>
+                        {lastMsg.sender === 'user' && (
+                          <span className="inline-flex mr-1 flex-shrink-0">
+                            {lastMsg.status === 'read' ? (
+                              <CheckCheck size={12} className="text-accent" />
+                            ) : lastMsg.status === 'delivered' ? (
+                              <CheckCheck size={12} className="text-muted" />
+                            ) : (
+                              <Check size={12} className="text-muted" />
+                            )}
+                          </span>
+                        )}
+                        <span className="truncate">
+                          {lastMsg.text || (lastMsg.file ? '📁 File attachment' : 'Encrypted message')}
+                        </span>
+                      </>
                     ) : (
                       <span className="text-muted italic">Secure channel open</span>
                     )}

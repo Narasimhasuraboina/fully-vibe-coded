@@ -46,9 +46,22 @@ export const ChatProvider = ({ children }) => {
   const [activeModal, setActiveModal] = useState(null); // 'broadcast' | 'schedule' | 'encryption' | 'gallery' | 'mediaViewer' | 'forward' | 'profile'
   const [modalData, setModalData] = useState(null);
 
-  // 8. UI Transients
+  // 8. Pinned Messages Store: { [contactId]: [messageId, ...] }
+  const [pinnedMessageIds, setPinnedMessageIds] = useState(() =>
+    currentUser ? loadAccountState(currentUser, 'pinned_messages', {}) : {}
+  );
+
+  // 9. In-Chat Message Search
+  const [isChatSearchOpen, setIsChatSearchOpen] = useState(false);
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
+
+  // 10. Audio Mute State
+  const [isSoundMuted, setIsSoundMuted] = useState(() => soundFX.isMuted());
+
+  // 11. UI Transients
   const [typingStatus, setTypingStatus] = useState({}); // { [contactId]: boolean }
   const [searchQuery, setSearchQuery] = useState('');
+  const typingTimersRef = useRef({});
 
   // Refs for real-time socket listeners
   const activeContactRef = useRef(activeContactId);
@@ -119,6 +132,18 @@ export const ChatProvider = ({ children }) => {
     }
   }, [settings, currentUser]);
 
+  useEffect(() => {
+    if (currentUser) {
+      saveAccountState(currentUser, 'pinned_messages', pinnedMessageIds);
+    }
+  }, [pinnedMessageIds, currentUser]);
+
+  const toggleSoundMute = useCallback(() => {
+    const next = soundFX.toggleMute();
+    setIsSoundMuted(next);
+    return next;
+  }, []);
+
   // Theme Setter
   const setTheme = (newTheme) => {
     if (!THEMES[newTheme]) return;
@@ -143,6 +168,26 @@ export const ChatProvider = ({ children }) => {
     return contacts.find((c) => c.id === activeContactId) || null;
   }, [activeContactId, contacts]);
 
+  // Read Receipts: Mark incoming messages from contact as read
+  const markMessagesAsRead = useCallback((targetContactId) => {
+    if (!targetContactId) return;
+    setMessages((prev) => {
+      const currentList = prev[targetContactId] || [];
+      let changed = false;
+      const updated = currentList.map((m) => {
+        if (m.sender !== 'user' && m.status !== 'read') {
+          changed = true;
+          if (m.senderTag) {
+            socketService.emitReadReceipt(m.id, m.senderTag);
+          }
+          return { ...m, status: 'read' };
+        }
+        return m;
+      });
+      return changed ? { ...prev, [targetContactId]: updated } : prev;
+    });
+  }, []);
+
   // Switch Active Contact
   const selectContact = useCallback((contactOrId) => {
     if (!contactOrId) {
@@ -156,7 +201,9 @@ export const ChatProvider = ({ children }) => {
     setContacts((prev) =>
       prev.map((c) => (c.id === id ? { ...c, unreadCount: 0 } : c))
     );
-  }, []);
+
+    markMessagesAsRead(id);
+  }, [markMessagesAsRead]);
 
   // Ensure contact exists or create direct chat
   const addOrSelectContact = useCallback((peer) => {
@@ -262,34 +309,48 @@ export const ChatProvider = ({ children }) => {
           );
         }
 
+        const isCurrentlyActive = activeContactRef.current === contactId;
+        const incomingMsg = {
+          ...message,
+          status: isCurrentlyActive ? 'read' : (message.status || 'delivered'),
+        };
+
         // Add message to conversation
         setMessages((prev) => {
           const existingList = prev[contactId] || [];
-          if (existingList.some((m) => m.id === message.id)) return prev;
+          if (existingList.some((m) => m.id === incomingMsg.id)) return prev;
           return {
             ...prev,
-            [contactId]: [...existingList, message],
+            [contactId]: [...existingList, incomingMsg],
           };
         });
 
-        // Trigger in-app toast notification & desktop alert
-        const previewText = message.text || (message.file ? `[Attachment: ${message.file.name}]` : 'Encrypted Signal');
-        notificationService.pushToast({
-          title: `INCOMING SIGNAL // ${senderTag}`,
-          message: previewText,
-          avatar: message.senderAvatar,
-          type: 'info',
-          onClick: () => selectContact(contactId),
-        });
-        notificationService.showDesktopNotification(`Signal from ${senderTag}`, {
-          body: previewText,
-        });
+        // Trigger in-app toast notification & desktop alert if not actively viewing
+        if (!isCurrentlyActive) {
+          const previewText = incomingMsg.text || (incomingMsg.file ? `[Attachment: ${incomingMsg.file.name}]` : 'Encrypted Signal');
+          notificationService.pushToast({
+            title: `INCOMING SIGNAL // ${senderTag}`,
+            message: previewText,
+            avatar: incomingMsg.senderAvatar,
+            type: 'info',
+            onClick: () => selectContact(contactId),
+          });
+          notificationService.showDesktopNotification(`Signal from ${senderTag}`, {
+            body: previewText,
+          });
+        }
 
         // Send delivery receipt back to sender
-        socketService.emitDeliveryReceipt(message.id, senderTag);
+        socketService.emitDeliveryReceipt(incomingMsg.id, senderTag);
+        if (isCurrentlyActive) {
+          socketService.emitReadReceipt(incomingMsg.id, senderTag);
+        }
       },
       onMessageStatusUpdate: (data) => {
         const { messageId, status } = data;
+        if (status === 'read') {
+          soundFX.playReadTick();
+        }
         setMessages((prev) => {
           let hasChanged = false;
           const next = { ...prev };
@@ -306,13 +367,52 @@ export const ChatProvider = ({ children }) => {
           return hasChanged ? next : prev;
         });
       },
+      onMessageReacted: (data) => {
+        const { messageId, emoji } = data;
+        setMessages((prev) => {
+          let hasChanged = false;
+          const next = { ...prev };
+          Object.keys(next).forEach((cId) => {
+            const list = next[cId];
+            const idx = list.findIndex((m) => m.id === messageId);
+            if (idx !== -1) {
+              const updatedList = [...list];
+              const reactions = { ...(updatedList[idx].reactions || {}) };
+              reactions[emoji] = (reactions[emoji] || 0) + 1;
+              updatedList[idx] = { ...updatedList[idx], reactions };
+              next[cId] = updatedList;
+              hasChanged = true;
+            }
+          });
+          return hasChanged ? next : prev;
+        });
+      },
+      onRateLimitExceeded: (data) => {
+        notificationService.pushToast({
+          title: 'FLOW CONTROL THROTTLED',
+          message: data?.error || 'Rate limit active. Please slow down packet transmission.',
+          type: 'warning',
+        });
+      },
       onTyping: (data) => {
         const { senderTag, isTyping } = data;
         const matched = contactsRef.current.find(
           (c) => c.tag?.toLowerCase() === senderTag?.toLowerCase()
         );
         if (matched) {
-          setTypingStatus((prev) => ({ ...prev, [matched.id]: isTyping }));
+          const contactId = matched.id;
+          if (typingTimersRef.current[contactId]) {
+            clearTimeout(typingTimersRef.current[contactId]);
+            delete typingTimersRef.current[contactId];
+          }
+
+          setTypingStatus((prev) => ({ ...prev, [contactId]: isTyping }));
+
+          if (isTyping) {
+            typingTimersRef.current[contactId] = setTimeout(() => {
+              setTypingStatus((prev) => ({ ...prev, [contactId]: false }));
+            }, 3500);
+          }
         }
       },
       onMessageDeleted: (data) => {
@@ -367,10 +467,12 @@ export const ChatProvider = ({ children }) => {
     const loadedMessages = loadAccountState(profile, 'messages', {});
     const loadedSettings = loadAccountState(profile, 'gb_settings', DEFAULT_GB_SETTINGS);
     const loadedScheduled = loadAccountState(profile, 'scheduled', []);
+    const loadedPinned = loadAccountState(profile, 'pinned_messages', {});
 
     setContacts(loadedContacts);
     setMessages(loadedMessages);
     setScheduledMessages(loadedScheduled);
+    setPinnedMessageIds(loadedPinned);
     setSettings(loadedSettings);
     setThemeState(loadedSettings.theme || 'matrix');
     setActiveContactId(loadedContacts[0]?.id || null);
@@ -386,6 +488,7 @@ export const ChatProvider = ({ children }) => {
     setContacts([]);
     setMessages({});
     setScheduledMessages([]);
+    setPinnedMessageIds({});
     setIsConnected(false);
     localStorage.removeItem('chatforge_my_profile');
   };
@@ -546,6 +649,8 @@ export const ChatProvider = ({ children }) => {
   // React to Message
   const reactMessage = useCallback((messageId, emoji) => {
     if (!activeContactId) return;
+    const targetContact = contacts.find((c) => c.id === activeContactId);
+
     setMessages((prev) => {
       const currentList = prev[activeContactId] || [];
       const updated = currentList.map((m) => {
@@ -557,6 +662,35 @@ export const ChatProvider = ({ children }) => {
         return m;
       });
       return { ...prev, [activeContactId]: updated };
+    });
+
+    if (targetContact) {
+      socketService.emitReaction(messageId, targetContact.tag, emoji);
+    }
+  }, [activeContactId, contacts]);
+
+  // Toggle Pin Message
+  const togglePinMessage = useCallback((messageId, contactId = null) => {
+    const targetId = contactId || activeContactId;
+    if (!targetId || !messageId) return;
+
+    soundFX.playPinSound();
+
+    setPinnedMessageIds((prev) => {
+      const list = prev[targetId] || [];
+      const isPinned = list.includes(messageId);
+      const updatedList = isPinned ? list.filter((id) => id !== messageId) : [messageId, ...list];
+
+      notificationService.pushToast({
+        title: isPinned ? 'MESSAGE UNPINNED' : 'MESSAGE PINNED',
+        message: isPinned ? 'Payload unpinned from conversation header.' : 'Payload pinned to top of conversation.',
+        type: 'info',
+      });
+
+      return {
+        ...prev,
+        [targetId]: updatedList,
+      };
     });
   }, [activeContactId]);
 
@@ -647,6 +781,10 @@ export const ChatProvider = ({ children }) => {
     addOrSelectContact,
     messages: messages[activeContactId] || [],
     allMessages: messages,
+    pinnedMessageIds: activeContactId ? (pinnedMessageIds[activeContactId] || []) : [],
+    allPinnedMessageIds: pinnedMessageIds,
+    togglePinMessage,
+    markMessagesAsRead,
     scheduledMessages,
     scheduleMessage,
     deleteScheduledMessage,
@@ -662,6 +800,12 @@ export const ChatProvider = ({ children }) => {
     emitTyping,
     searchQuery,
     setSearchQuery,
+    isChatSearchOpen,
+    setIsChatSearchOpen,
+    chatSearchQuery,
+    setChatSearchQuery,
+    isSoundMuted,
+    toggleSoundMute,
     activeModal,
     modalData,
     openModal,

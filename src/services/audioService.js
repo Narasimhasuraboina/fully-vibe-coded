@@ -3,6 +3,8 @@ class SoundFX {
   constructor() {
     this.ctx = null;
     this.enabled = true;
+    this.muted = false;
+    this.masterVolume = 0.8;
   }
 
   init() {
@@ -17,8 +19,25 @@ class SoundFX {
     }
   }
 
+  setMuted(isMuted) {
+    this.muted = !!isMuted;
+  }
+
+  toggleMute() {
+    this.muted = !this.muted;
+    return this.muted;
+  }
+
+  isMuted() {
+    return this.muted || !this.enabled;
+  }
+
+  setVolume(vol) {
+    this.masterVolume = Math.max(0, Math.min(1, vol));
+  }
+
   playBeep(freq = 800, type = 'sine', duration = 0.05, gainValue = 0.05) {
-    if (!this.enabled) return;
+    if (this.isMuted()) return;
     try {
       this.init();
       if (!this.ctx) return;
@@ -29,7 +48,8 @@ class SoundFX {
       osc.type = type;
       osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
 
-      gain.gain.setValueAtTime(gainValue, this.ctx.currentTime);
+      const effectiveGain = gainValue * this.masterVolume;
+      gain.gain.setValueAtTime(effectiveGain, this.ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
 
       osc.connect(gain);
@@ -156,6 +176,25 @@ class SoundFX {
   playCommandExec() {
     this.playBeep(450, 'sawtooth', 0.08, 0.04);
   }
+
+  // Read receipt tick (crisp double micro-chirp)
+  playReadTick() {
+    if (this.isMuted()) return;
+    this.playBeep(1200, 'sine', 0.025, 0.03);
+    setTimeout(() => {
+      this.playBeep(1500, 'sine', 0.035, 0.04);
+    }, 45);
+  }
+
+  // Message Pin / Anchor tone (futuristic resonant ping)
+  playPinSound() {
+    if (this.isMuted()) return;
+    this.playBeep(987.77, 'triangle', 0.07, 0.06); // B5
+    setTimeout(() => {
+      this.playBeep(1318.51, 'sine', 0.12, 0.07); // E6
+    }, 60);
+  }
 }
 
 export const soundFX = new SoundFX();
+

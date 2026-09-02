@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Terminal, Shield, LogOut, Palette, ChevronDown, Check, Radio, Calendar } from 'lucide-react';
+import { Terminal, Shield, LogOut, Palette, ChevronDown, Check, Radio, Calendar, Volume2, VolumeX } from 'lucide-react';
 import { useChat } from '../../context/useChat';
 import { THEMES } from '../../themes';
 
@@ -13,6 +13,8 @@ export const Header = () => {
     serverInfo,
     openModal,
     scheduledMessages,
+    isSoundMuted,
+    toggleSoundMute,
   } = useChat();
   const [showThemePicker, setShowThemePicker] = useState(false);
   const dropdownRef = useRef(null);
@@ -120,6 +122,20 @@ export const Header = () => {
             </div>
           )}
         </div>
+
+        {/* Sound FX Toggle */}
+        <button
+          type="button"
+          className="cyber-btn btn-icon"
+          onClick={toggleSoundMute}
+          title={isSoundMuted ? 'Sound FX: MUTED (Click to unmute)' : 'Sound FX: ACTIVE (Click to mute)'}
+        >
+          {isSoundMuted ? (
+            <VolumeX size={15} className="text-danger" />
+          ) : (
+            <Volume2 size={15} className="text-accent" />
+          )}
+        </button>
 
         {/* User Profile Pill */}
         {currentUser && (

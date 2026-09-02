@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import { 
   ArrowLeft, 
   ShieldCheck, 
@@ -18,7 +18,12 @@ import {
   Play,
   Pause,
   Code as CodeIcon,
-  Maximize2
+  Maximize2,
+  Pin,
+  Search,
+  ChevronUp,
+  ChevronDown,
+  X
 } from 'lucide-react';
 import { useChat } from '../../context/useChat';
 import { MessageInput } from './MessageInput';
@@ -112,10 +117,17 @@ export const ChatArea = () => {
     reactMessage,
     deleteMessage,
     openModal,
+    pinnedMessageIds,
+    togglePinMessage,
+    isChatSearchOpen,
+    setIsChatSearchOpen,
+    chatSearchQuery,
+    setChatSearchQuery,
   } = useChat();
 
   const [showMenu, setShowMenu] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const messagesEndRef = useRef(null);
 
   // Auto-scroll to bottom
@@ -133,6 +145,66 @@ export const ChatArea = () => {
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 1500);
   };
+
+  // Search matches within active thread
+  const searchMatches = useMemo(() => {
+    if (!chatSearchQuery.trim()) return [];
+    const q = chatSearchQuery.toLowerCase();
+    return messages.filter(
+      (m) =>
+        (m.text && m.text.toLowerCase().includes(q)) ||
+        (m.fileName && m.fileName.toLowerCase().includes(q)) ||
+        (m.code && m.code.toLowerCase().includes(q))
+    );
+  }, [messages, chatSearchQuery]);
+
+  // Jump to matched message in chat
+  const jumpToMatch = (index) => {
+    if (searchMatches.length === 0) return;
+    const targetIdx = (index + searchMatches.length) % searchMatches.length;
+    setCurrentMatchIndex(targetIdx);
+    const targetMsg = searchMatches[targetIdx];
+    if (targetMsg) {
+      const el = document.getElementById(`msg-${targetMsg.id}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('pulse-match');
+        setTimeout(() => el.classList.remove('pulse-match'), 1600);
+      }
+    }
+  };
+
+  // Jump to specific message by ID
+  const jumpToMessage = (msgId) => {
+    const el = document.getElementById(`msg-${msgId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('pulse-match');
+      setTimeout(() => el.classList.remove('pulse-match'), 1600);
+    }
+  };
+
+  // Helper to highlight matching text
+  const renderHighlightedText = (text, query) => {
+    if (!query || !query.trim() || !text) return text;
+    const q = query.trim();
+    const regex = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    const parts = text.split(regex);
+    return parts.map((part, i) =>
+      regex.test(part) ? (
+        <mark key={i} className="search-highlight bg-accent/30 text-accent font-bold px-0.5 rounded">
+          {part}
+        </mark>
+      ) : (
+        part
+      )
+    );
+  };
+
+  // Pinned messages list
+  const pinnedMessages = useMemo(() => {
+    return messages.filter((m) => pinnedMessageIds.includes(m.id));
+  }, [messages, pinnedMessageIds]);
 
   if (!activeContact) {
     return <EmptyState onStartChat={() => {}} />;
@@ -188,6 +260,19 @@ export const ChatArea = () => {
 
         {/* Right Header Actions */}
         <div className="flex items-center gap-2">
+          {/* In-Chat Message Search Toggle */}
+          <button
+            type="button"
+            className={`cyber-btn btn-icon ${isChatSearchOpen ? 'bg-accent/20 text-accent' : ''}`}
+            onClick={() => {
+              setIsChatSearchOpen(!isChatSearchOpen);
+              if (isChatSearchOpen) setChatSearchQuery('');
+            }}
+            title="Search in conversation"
+          >
+            <Search size={15} />
+          </button>
+
           {/* E2EE Safety Number Cipher Inspector */}
           <button
             type="button"
@@ -268,6 +353,106 @@ export const ChatArea = () => {
         </div>
       </div>
 
+      {/* In-Chat Search Bar Toolbar */}
+      {isChatSearchOpen && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-bg-card border-b border-border text-xs z-10 animate-fadeIn">
+          <Search size={14} className="text-accent flex-shrink-0" />
+          <input
+            type="text"
+            autoFocus
+            placeholder="Search conversation..."
+            className="cyber-input py-1 text-xs flex-1"
+            value={chatSearchQuery}
+            onChange={(e) => {
+              setChatSearchQuery(e.target.value);
+              setCurrentMatchIndex(0);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                jumpToMatch(currentMatchIndex + (e.shiftKey ? -1 : 1));
+              } else if (e.key === 'Escape') {
+                setIsChatSearchOpen(false);
+                setChatSearchQuery('');
+              }
+            }}
+          />
+          <span className="text-muted font-mono text-[11px] whitespace-nowrap">
+            {chatSearchQuery.trim()
+              ? `${searchMatches.length === 0 ? 0 : currentMatchIndex + 1}/${searchMatches.length}`
+              : '0 matches'}
+          </span>
+          <button
+            type="button"
+            className="cyber-btn btn-icon p-1"
+            disabled={searchMatches.length === 0}
+            onClick={() => jumpToMatch(currentMatchIndex - 1)}
+            title="Previous match (Shift+Enter)"
+          >
+            <ChevronUp size={14} />
+          </button>
+          <button
+            type="button"
+            className="cyber-btn btn-icon p-1"
+            disabled={searchMatches.length === 0}
+            onClick={() => jumpToMatch(currentMatchIndex + 1)}
+            title="Next match (Enter)"
+          >
+            <ChevronDown size={14} />
+          </button>
+          <button
+            type="button"
+            className="cyber-btn btn-icon p-1 text-muted hover:text-danger"
+            onClick={() => {
+              setIsChatSearchOpen(false);
+              setChatSearchQuery('');
+            }}
+            title="Close (Esc)"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* Pinned Messages Header Banner */}
+      {pinnedMessages.length > 0 && (
+        <div className="flex items-center justify-between px-3 py-1.5 bg-bg-card/90 border-b border-accent/30 text-xs z-10 backdrop-blur-sm">
+          <div
+            className="flex items-center gap-2 overflow-hidden flex-1 cursor-pointer"
+            onClick={() => jumpToMessage(pinnedMessages[0].id)}
+          >
+            <Pin size={12} className="text-accent fill-accent flex-shrink-0" />
+            <span className="text-[10px] font-bold text-accent font-mono tracking-wider flex-shrink-0">
+              PINNED //
+            </span>
+            <span className="truncate text-text-main text-[11px]">
+              {pinnedMessages[0].text || pinnedMessages[0].fileName || 'Encrypted Payload'}
+            </span>
+            {pinnedMessages.length > 1 && (
+              <span className="text-[10px] text-muted font-mono ml-1">
+                +{pinnedMessages.length - 1} more
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 ml-2">
+            <button
+              type="button"
+              className="cyber-btn text-[10px] py-0.5 px-2 font-mono text-accent"
+              onClick={() => jumpToMessage(pinnedMessages[0].id)}
+            >
+              JUMP
+            </button>
+            <button
+              type="button"
+              className="cyber-btn btn-icon text-muted hover:text-danger p-1"
+              onClick={() => togglePinMessage(pinnedMessages[0].id)}
+              title="Unpin from conversation"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Messages Thread Feed */}
       <div className="messages-feed">
         {messages.length === 0 ? (
@@ -283,18 +468,28 @@ export const ChatArea = () => {
             const isImage = (msg.file && msg.file.type?.startsWith('image/')) || msg.type === 'image';
             const isAudio = msg.type === 'audio' || !!msg.audioUrl;
             const isCode = msg.type === 'code' || !!msg.code;
+            const isPinned = pinnedMessageIds.includes(msg.id);
 
             return (
               <div
                 key={msg.id}
-                className={`message-row ${isUser ? 'sent' : 'received'}`}
+                id={`msg-${msg.id}`}
+                className={`message-row ${isUser ? 'sent' : 'received'} transition-all duration-300`}
               >
-                <div className={`message-bubble ${isUser ? 'user-bubble' : 'contact-bubble'}`}>
+                <div className={`message-bubble ${isUser ? 'user-bubble' : 'contact-bubble'} ${isPinned ? 'border-accent/40 shadow-[0_0_8px_rgba(0,255,102,0.15)]' : ''}`}>
                   {/* Deleted message indicator */}
                   {msg.deleted ? (
                     <span className="italic text-muted text-xs">🚫 This message was deleted</span>
                   ) : (
                     <>
+                      {/* Pinned indicator chip inside bubble */}
+                      {isPinned && (
+                        <div className="flex items-center gap-1 text-[9px] text-accent font-mono mb-1">
+                          <Pin size={10} className="fill-accent" />
+                          <span>PINNED ANCHOR</span>
+                        </div>
+                      )}
+
                       {/* Burn-After-Read Warning Header */}
                       {msg.burnAfterRead && (
                         <div className="flex items-center gap-1.5 text-[10px] text-danger mb-1 font-mono">
@@ -368,9 +563,11 @@ export const ChatArea = () => {
                         </div>
                       )}
 
-                      {/* Text Content */}
+                      {/* Text Content with In-Chat Search Highlighting */}
                       {msg.text && !isCode && (
-                        <p className="message-text whitespace-pre-wrap break-words">{msg.text}</p>
+                        <p className="message-text whitespace-pre-wrap break-words">
+                          {renderHighlightedText(msg.text, chatSearchQuery)}
+                        </p>
                       )}
                     </>
                   )}
@@ -387,7 +584,7 @@ export const ChatArea = () => {
                     </div>
                   )}
 
-                  {/* Message Meta Info: Reactions Picker, Forward, Delete & Timestamp */}
+                  {/* Message Meta Info: Reactions Picker, Pin, Forward, Delete & Timestamp */}
                   <div className="message-meta flex items-center justify-between mt-1 pt-1 border-t border-white/5 gap-2">
                     <div className="flex items-center gap-1.5">
                       {/* Reaction quick emojis */}
@@ -403,11 +600,23 @@ export const ChatArea = () => {
                         </button>
                       ))}
 
+                      {/* Pin/Unpin action */}
+                      {!msg.deleted && (
+                        <button
+                          type="button"
+                          className={`text-[10px] ${isPinned ? 'text-accent' : 'text-muted hover:text-accent'} ml-1 transition-colors`}
+                          title={isPinned ? 'Unpin message' : 'Pin message to header'}
+                          onClick={() => togglePinMessage(msg.id)}
+                        >
+                          <Pin size={11} className={isPinned ? 'fill-accent' : ''} />
+                        </button>
+                      )}
+
                       {/* Forward action */}
                       {!msg.deleted && (
                         <button
                           type="button"
-                          className="text-[10px] text-muted hover:text-accent ml-1 transition-colors"
+                          className="text-[10px] text-muted hover:text-accent ml-0.5 transition-colors"
                           title="Forward payload"
                           onClick={() => openModal('forward', msg)}
                         >
@@ -443,13 +652,19 @@ export const ChatArea = () => {
                     <div className="flex items-center gap-1 text-[10px]">
                       <span className="message-time font-mono">{msg.timestamp}</span>
                       {isUser && (
-                        <span className="message-status">
-                          {msg.status === 'delivered' ? (
-                            <CheckCheck size={13} className="text-muted" />
-                          ) : msg.status === 'read' ? (
-                            <CheckCheck size={13} className="text-accent" />
+                        <span className="message-status flex items-center">
+                          {msg.status === 'read' ? (
+                            <span title="Read by recipient" className="flex items-center text-accent">
+                              <CheckCheck size={13} className="drop-shadow-[0_0_4px_var(--accent)]" />
+                            </span>
+                          ) : msg.status === 'delivered' ? (
+                            <span title="Delivered to peer node" className="flex items-center text-muted">
+                              <CheckCheck size={13} />
+                            </span>
                           ) : (
-                            <Check size={13} className="text-muted" />
+                            <span title="Dispatched to relay" className="flex items-center text-muted">
+                              <Check size={13} />
+                            </span>
                           )}
                         </span>
                       )}
@@ -459,6 +674,25 @@ export const ChatArea = () => {
               </div>
             );
           })
+        )}
+
+        {/* Real-time Typing Bubble in conversation feed */}
+        {typingStatus && (
+          <div className="message-row received animate-fadeIn">
+            <div className="message-bubble contact-bubble flex items-center gap-2 py-2 px-3 border border-accent/30 bg-bg-card">
+              <img
+                src={activeContact.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80'}
+                alt=""
+                className="w-5 h-5 rounded-full object-cover border border-accent/40"
+              />
+              <div className="flex items-center gap-1 py-0.5">
+                <span className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+              <span className="text-[10px] text-accent font-mono ml-1">transmitting packets...</span>
+            </div>
+          </div>
         )}
 
         <div ref={messagesEndRef} />

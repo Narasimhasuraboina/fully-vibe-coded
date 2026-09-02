@@ -60,6 +60,56 @@ function loadUserDatabase() {
   }
 }
 
+// Atomic write helper to prevent database corruption on abrupt restarts
+function safeAtomicWrite(filePath, data) {
+  const tmpFile = `${filePath}.tmp.${Date.now()}.${Math.random().toString(36).substring(2, 6)}`;
+  try {
+    fs.writeFileSync(tmpFile, data, 'utf8');
+    fs.renameSync(tmpFile, filePath);
+  } catch (err) {
+    if (fs.existsSync(tmpFile)) {
+      try { fs.unlinkSync(tmpFile); } catch {}
+    }
+    throw err;
+  }
+}
+
+// Rate Limiters
+// 1. Auth Rate Limiter: max 12 attempts per minute per IP
+const authAttempts = new Map(); // ip -> { count, resetTime }
+function checkAuthRateLimit(ip) {
+  const now = Date.now();
+  const entry = authAttempts.get(ip);
+  if (!entry || now > entry.resetTime) {
+    authAttempts.set(ip, { count: 1, resetTime: now + 60000 });
+    return true;
+  }
+  if (entry.count >= 12) {
+    return false;
+  }
+  entry.count++;
+  return true;
+}
+
+// 2. Message Rate Limiter: max 35 messages per 5 seconds per socket
+const messageRateMap = new Map(); // socketId -> { count, resetTime }
+function checkMessageRateLimit(socketId) {
+  const now = Date.now();
+  const entry = messageRateMap.get(socketId);
+  if (!entry || now > entry.resetTime) {
+    messageRateMap.set(socketId, { count: 1, resetTime: now + 5000 });
+    return true;
+  }
+  if (entry.count >= 35) {
+    return false;
+  }
+  entry.count++;
+  return true;
+}
+
+// 3. Payload size limit: 25MB max
+const MAX_MESSAGE_SIZE_BYTES = 25 * 1024 * 1024;
+
 // Save persistent users DB
 function saveUserDatabase() {
   try {
@@ -75,7 +125,7 @@ function saveUserDatabase() {
         lastSeen: user.lastSeen,
       };
     });
-    fs.writeFileSync(DB_FILE, JSON.stringify(obj, null, 2), 'utf8');
+    safeAtomicWrite(DB_FILE, JSON.stringify(obj, null, 2));
   } catch (err) {
     console.error('[DATABASE] Error saving users_db.json:', err);
   }
@@ -106,7 +156,7 @@ function saveMailboxDatabase() {
         obj[tag] = msgs;
       }
     });
-    fs.writeFileSync(MAILBOX_FILE, JSON.stringify(obj, null, 2), 'utf8');
+    safeAtomicWrite(MAILBOX_FILE, JSON.stringify(obj, null, 2));
   } catch (err) {
     console.error('[MAILBOX] Error saving offline_mailbox.json:', err);
   }
@@ -220,6 +270,13 @@ io.on('connection', (socket) => {
 
   // 1. Password-Protected Authentication & Registration
   socket.on('authenticate_user', (authData, callback) => {
+    if (!checkAuthRateLimit(clientIP)) {
+      const resp = { success: false, error: 'Too many authentication attempts. Please wait 60 seconds.' };
+      if (typeof callback === 'function') callback(resp);
+      else socket.emit('auth_response', resp);
+      return;
+    }
+
     const rawUsername = authData.username || '';
     const cleanUser = rawUsername.trim().replace(/^@/, '');
     const tag = `@${cleanUser.toLowerCase()}`;
@@ -389,6 +446,29 @@ io.on('connection', (socket) => {
 
   // 3. Relay Message Protocol with Room-based Delivery & Store-and-Forward Encrypted Mailbox
   socket.on('send_message', (payload) => {
+    // Check message rate limit per socket
+    if (!checkMessageRateLimit(socket.id)) {
+      socket.emit('rate_limit_exceeded', {
+        error: 'Transmission rate limit reached. Please wait a few moments before sending more packets.',
+        retryAfterSeconds: 3,
+      });
+      return;
+    }
+
+    // Check payload size
+    try {
+      const payloadBytes = Buffer.byteLength(JSON.stringify(payload));
+      if (payloadBytes > MAX_MESSAGE_SIZE_BYTES) {
+        socket.emit('message_rejected', {
+          error: 'Payload size exceeds the 25MB limit. Please compress or select a smaller file.',
+          messageId: payload?.message?.id,
+        });
+        return;
+      }
+    } catch {
+      // Ignore JSON measurement error
+    }
+
     const senderTag = socket.userTag;
     const sender = senderTag ? registeredUsers.get(normalizeTag(senderTag)) : null;
     if (!sender || !payload || typeof payload.message !== 'object') {
@@ -477,6 +557,46 @@ io.on('connection', (socket) => {
     io.to(cleanRecipientTag).emit('peer_typing', {
       senderTag: sender.tag,
       isTyping,
+    });
+  });
+
+  // 7. Message Read Receipt (Double Cyan Tick Protocol)
+  socket.on('message_read', ({ messageId, senderTag }) => {
+    const cleanSenderTag = normalizeTag(senderTag);
+    const viewer = socket.userTag ? registeredUsers.get(normalizeTag(socket.userTag)) : null;
+
+    io.to(cleanSenderTag).emit('message_read_ack', {
+      messageId,
+      readerTag: viewer?.tag || socket.userTag,
+      readAt: Date.now(),
+    });
+  });
+
+  // 8. Message Reaction Relay
+  socket.on('message_reaction', ({ messageId, recipientTag, emoji }) => {
+    const cleanRecipientTag = normalizeTag(recipientTag);
+    const sender = socket.userTag ? registeredUsers.get(normalizeTag(socket.userTag)) : null;
+    if (!sender) return;
+
+    io.to(cleanRecipientTag).emit('message_reacted', {
+      messageId,
+      senderTag: sender.tag,
+      emoji,
+    });
+  });
+
+  // 9. Remote Message Delete
+  socket.on('delete_message', ({ messageId, targetTag }) => {
+    const cleanTargetTag = normalizeTag(targetTag);
+    io.to(cleanTargetTag).emit('message_deleted', { messageId });
+  });
+
+  // 10. Delivery Receipt Confirmation
+  socket.on('delivery_receipt', ({ messageId, recipientTag }) => {
+    const cleanRecipientTag = normalizeTag(recipientTag);
+    io.to(cleanRecipientTag).emit('message_delivered_ack', {
+      messageId,
+      status: 'delivered',
     });
   });
 

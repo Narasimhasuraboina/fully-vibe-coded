@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Paperclip, Smile, X } from 'lucide-react';
 import { useChat } from '../../context/useChat';
+import { notificationService } from '../../services/notificationService';
 
 const EMOJI_LIST = ['👍', '❤️', '🔥', '⚡', '🤖', '💀', '🛡️', '🔒', '👀', '🚀'];
+const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
 
 export const MessageInput = () => {
   const { sendMessage, emitTyping, activeContact } = useChat();
@@ -20,7 +22,12 @@ export const MessageInput = () => {
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     typingTimerRef.current = setTimeout(() => {
       emitTyping(false);
-    }, 1500);
+    }, 1800);
+  };
+
+  const handleInputBlur = () => {
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    emitTyping(false);
   };
 
   useEffect(() => {
@@ -29,16 +36,35 @@ export const MessageInput = () => {
     };
   }, []);
 
-  // Handle file select
+  // Format bytes to human readable
+  const formatFileSize = (bytes) => {
+    if (!bytes) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  // Handle file select with 25MB validation
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    if (file.size > MAX_FILE_SIZE) {
+      notificationService.pushToast({
+        title: 'PAYLOAD SIZE EXCEEDED',
+        message: `Selected file (${formatFileSize(file.size)}) exceeds the 25MB limit.`,
+        type: 'warning',
+      });
+      e.target.value = '';
+      return;
+    }
 
     const reader = new FileReader();
     reader.onload = () => {
       setAttachment({
         name: file.name,
-        size: file.size,
+        size: formatFileSize(file.size),
+        rawSize: file.size,
         type: file.type,
         data: reader.result,
       });
@@ -52,6 +78,9 @@ export const MessageInput = () => {
     e?.preventDefault();
     if (!text.trim() && !attachment) return;
 
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    emitTyping(false);
+
     sendMessage({
       text: text.trim(),
       type: attachment ? (attachment.type.startsWith('image/') ? 'image' : 'file') : 'text',
@@ -61,7 +90,6 @@ export const MessageInput = () => {
     setText('');
     setAttachment(null);
     setShowEmojiPicker(false);
-    emitTyping(false);
   };
 
   const handleKeyDown = (e) => {
@@ -142,6 +170,7 @@ export const MessageInput = () => {
           placeholder={activeContact ? `Transmit to ${activeContact.name || activeContact.tag}...` : 'Write message...'}
           value={text}
           onChange={handleInputChange}
+          onBlur={handleInputBlur}
           onKeyDown={handleKeyDown}
         />
 

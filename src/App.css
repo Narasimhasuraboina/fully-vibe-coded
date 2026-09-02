@@ -4825,3 +4825,47 @@
   color: #fff;
   box-shadow: 0 0 15px rgba(255, 51, 102, 0.5);
 }
+
+/* In-Chat Search Highlighting & Message Jump Highlights */
+.search-highlight {
+  background: var(--accent-glow);
+  color: var(--accent);
+  padding: 1px 3px;
+  border-radius: 2px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--accent);
+}
+
+.pulse-match {
+  animation: pulseMatchGlow 1.6s ease-out;
+}
+
+@keyframes pulseMatchGlow {
+  0% {
+    transform: scale(1.02);
+    box-shadow: 0 0 20px var(--accent), inset 0 0 10px var(--accent-glow);
+    border-color: var(--accent) !important;
+  }
+  50% {
+    box-shadow: 0 0 12px var(--accent);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: none;
+  }
+}
+
+@keyframes fadeInSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeInSlideUp 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}

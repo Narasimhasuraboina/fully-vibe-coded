@@ -6,6 +6,11 @@ class RealtimeSocketService {
     this.isConnected = false;
     this.currentProfile = null;
     this.listeners = new Map();
+    this.callbacks = {};
+  }
+
+  setListeners(callbacks = {}) {
+    this.callbacks = { ...this.callbacks, ...callbacks };
   }
 
   getServerUrl() {
@@ -78,6 +83,9 @@ class RealtimeSocketService {
 
   connect(profile, callbacks = {}) {
     this.currentProfile = profile;
+    if (callbacks && typeof callbacks === 'object') {
+      this.callbacks = { ...this.callbacks, ...callbacks };
+    }
     const serverUrl = this.getServerUrl();
 
     if (!this.socket) {
@@ -107,12 +115,12 @@ class RealtimeSocketService {
           isRegisterMode: false,
         }, (res) => {
           if (res && res.success) {
-            if (callbacks.onRegistered) callbacks.onRegistered(res);
+            if (this.callbacks.onRegistered) this.callbacks.onRegistered(res);
           }
         });
       }
 
-      if (callbacks.onConnect) callbacks.onConnect();
+      if (this.callbacks.onConnect) this.callbacks.onConnect();
     });
 
     // If socket is already active and connected, authenticate immediately
@@ -126,70 +134,92 @@ class RealtimeSocketService {
         isRegisterMode: false,
       }, (res) => {
         if (res && res.success) {
-          if (callbacks.onRegistered) callbacks.onRegistered(res);
+          if (this.callbacks.onRegistered) this.callbacks.onRegistered(res);
         }
       });
-      if (callbacks.onConnect) callbacks.onConnect();
+      if (this.callbacks.onConnect) this.callbacks.onConnect();
     }
 
     this.socket.on('disconnect', () => {
       this.isConnected = false;
       console.log('[REALTIME] Disconnected from Relay Server');
-      if (callbacks.onDisconnect) callbacks.onDisconnect();
+      if (this.callbacks.onDisconnect) this.callbacks.onDisconnect();
     });
 
     this.socket.on('registered', (data) => {
-      if (callbacks.onRegistered) callbacks.onRegistered(data);
+      if (this.callbacks.onRegistered) this.callbacks.onRegistered(data);
     });
 
     this.socket.on('online_peers_list', (peers) => {
-      if (callbacks.onPeersUpdate) callbacks.onPeersUpdate(peers);
+      if (this.callbacks.onPeersUpdate) this.callbacks.onPeersUpdate(peers);
     });
 
     this.socket.on('peer_online_event', ({ peer }) => {
-      if (callbacks.onPeerOnline) callbacks.onPeerOnline(peer);
+      if (this.callbacks.onPeerOnline) this.callbacks.onPeerOnline(peer);
       // Auto flush pending outbox for this newly online peer
-      this.flushOutboxForPeer(peer.tag, callbacks.onOutboxMessageDispatched);
+      this.flushOutboxForPeer(peer.tag, this.callbacks.onOutboxMessageDispatched);
     });
 
     this.socket.on('peer_offline_event', (data) => {
-      if (callbacks.onPeerOffline) callbacks.onPeerOffline(data);
+      if (this.callbacks.onPeerOffline) this.callbacks.onPeerOffline(data);
     });
 
     this.socket.on('receive_message', (payload) => {
-      if (callbacks.onReceiveMessage) callbacks.onReceiveMessage(payload);
+      if (this.callbacks.onReceiveMessage) this.callbacks.onReceiveMessage(payload);
     });
 
     this.socket.on('message_delivered_ack', (ack) => {
-      if (callbacks.onMessageDelivered) callbacks.onMessageDelivered(ack);
+      if (this.callbacks.onMessageDelivered) this.callbacks.onMessageDelivered(ack);
+      if (this.callbacks.onMessageStatusUpdate) {
+        this.callbacks.onMessageStatusUpdate({ messageId: ack?.messageId, status: 'delivered' });
+      }
+    });
+
+    this.socket.on('message_read_ack', (data) => {
+      if (this.callbacks.onMessageStatusUpdate) {
+        this.callbacks.onMessageStatusUpdate({ messageId: data?.messageId, status: 'read' });
+      }
+    });
+
+    this.socket.on('message_reacted', (data) => {
+      if (this.callbacks.onMessageReacted) this.callbacks.onMessageReacted(data);
+    });
+
+    this.socket.on('message_deleted', (data) => {
+      if (this.callbacks.onMessageDeleted) this.callbacks.onMessageDeleted(data);
     });
 
     this.socket.on('message_queued_server_ack', (data) => {
-      if (callbacks.onMessageQueuedInServerMailbox) callbacks.onMessageQueuedInServerMailbox(data);
+      if (this.callbacks.onMessageQueuedInServerMailbox) this.callbacks.onMessageQueuedInServerMailbox(data);
     });
 
     this.socket.on('message_rejected', (data) => {
-      if (callbacks.onMessageRejected) callbacks.onMessageRejected(data);
+      if (this.callbacks.onMessageRejected) this.callbacks.onMessageRejected(data);
+    });
+
+    this.socket.on('rate_limit_exceeded', (data) => {
+      if (this.callbacks.onRateLimitExceeded) this.callbacks.onRateLimitExceeded(data);
     });
 
     this.socket.on('mailbox_delivered_summary', (data) => {
-      if (callbacks.onMailboxDeliveredSummary) callbacks.onMailboxDeliveredSummary(data);
+      if (this.callbacks.onMailboxDeliveredSummary) this.callbacks.onMailboxDeliveredSummary(data);
     });
 
     this.socket.on('peer_offline_ack', (ack) => {
-      if (callbacks.onPeerOfflineAck) callbacks.onPeerOfflineAck(ack);
+      if (this.callbacks.onPeerOfflineAck) this.callbacks.onPeerOfflineAck(ack);
     });
 
     this.socket.on('message_viewed_by_peer', (data) => {
-      if (callbacks.onMessageViewedByPeer) callbacks.onMessageViewedByPeer(data);
+      if (this.callbacks.onMessageViewedByPeer) this.callbacks.onMessageViewedByPeer(data);
     });
 
     this.socket.on('message_shredded_ack', (data) => {
-      if (callbacks.onMessageShredded) callbacks.onMessageShredded(data);
+      if (this.callbacks.onMessageShredded) this.callbacks.onMessageShredded(data);
     });
 
     this.socket.on('peer_typing', (data) => {
-      if (callbacks.onPeerTyping) callbacks.onPeerTyping(data);
+      if (this.callbacks.onPeerTyping) this.callbacks.onPeerTyping(data);
+      if (this.callbacks.onTyping) this.callbacks.onTyping(data);
     });
   }
 
@@ -272,6 +302,45 @@ class RealtimeSocketService {
   emitTyping(recipientTag, isTyping) {
     if (this.socket && this.isConnected) {
       this.socket.emit('typing_indicator', { recipientTag, isTyping });
+    }
+  }
+
+  // Delivery confirmation receipt
+  emitDeliveryReceipt(messageId, recipientTag) {
+    if (this.socket && this.isConnected) {
+      this.socket.emit('delivery_receipt', { messageId, recipientTag });
+    }
+  }
+
+  // Read receipt (blue tick protocol)
+  emitReadReceipt(messageId, senderTag) {
+    if (this.socket && this.isConnected) {
+      this.socket.emit('message_read', { messageId, senderTag });
+    }
+  }
+
+  // Emoji reaction relay
+  emitReaction(messageId, recipientTag, emoji) {
+    if (this.socket && this.isConnected) {
+      this.socket.emit('message_reaction', { messageId, recipientTag, emoji });
+    }
+  }
+
+  // Delete message for everyone
+  emitMessageDelete(messageId, targetTag) {
+    if (this.socket && this.isConnected) {
+      this.socket.emit('delete_message', { messageId, targetTag });
+    }
+  }
+
+  // Generic emit helper
+  emit(event, data, callback) {
+    if (this.socket && this.isConnected) {
+      if (typeof callback === 'function') {
+        this.socket.emit(event, data, callback);
+      } else {
+        this.socket.emit(event, data);
+      }
     }
   }
 
