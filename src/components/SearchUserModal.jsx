@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, UserPlus, X, MessageSquare, Shield, Lock, Radio, Send, Zap } from 'lucide-react';
+import { Search, UserPlus, X, MessageSquare, Shield, Lock, Radio } from 'lucide-react';
 import { soundFX } from '../services/audioService';
 import { socketService } from '../services/socketService';
 
@@ -16,10 +16,10 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
       setIsSearching(true);
       socketService.searchUsers(cleanQ, (results) => {
         // Also query known local contacts
-        const localMatches = (existingContacts || []).filter(c =>
+        const localMatches = (existingContacts || []).filter(c => /^@[A-Za-z0-9._=/-]+:[A-Za-z0-9.-]+(?::\d+)?$/.test(c.tag || '') && (
           (c.name && c.name.toLowerCase().includes(cleanQ)) ||
           (c.tag && c.tag.toLowerCase().includes(cleanQ))
-        ).map(c => ({
+        )).map(c => ({
           username: c.name,
           tag: c.tag,
           avatar: c.avatar,
@@ -73,19 +73,6 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
     onClose();
   };
 
-  const handleDirectStart = (rawName) => {
-    const cleanUser = rawName.trim().replace(/^@/, '');
-    if (!cleanUser) return;
-    handleStartChat({
-      username: cleanUser,
-      tag: `@${cleanUser.toLowerCase()}`,
-      status: 'offline',
-      lastSeen: 'offline',
-      customStatus: 'Offline Node (Mailbox Ready)',
-      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-    });
-  };
-
   const cleanQuery = searchQuery.trim().replace(/^@/, '');
 
   return (
@@ -101,7 +88,7 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
 
         <div className="modal-body">
           <p className="modal-description">
-            Enter an operator's <strong>@username</strong> to open an encrypted session. Works seamlessly for both <strong>online</strong> and <strong>offline</strong> registered peers.
+            Enter an operator's <strong>@username</strong> to start a conversation. Works for both <strong>online</strong> and <strong>offline</strong> registered peers.
           </p>
 
           <div className="search-input-box">
@@ -148,17 +135,8 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
             ) : searchResults.length === 0 ? (
               <div className="empty-search-state">
                 <Shield size={32} className="text-accent" />
-                <p>START CHAT WITH @{cleanQuery}</p>
-                <span>Recipient is currently offline. Your encrypted messages will be held in the Server Mailbox and delivered the moment they log in.</span>
-                
-                <button
-                  className="cyber-btn btn-primary btn-direct-start"
-                  onClick={() => handleDirectStart(cleanQuery)}
-                  style={{ marginTop: '12px', width: '100%' }}
-                >
-                  <Send size={14} />
-                  <span>START CHAT WITH @{cleanQuery.toUpperCase()} (OFFLINE MAILBOX READY)</span>
-                </button>
+                <p>NO ACCOUNT FOUND</p>
+                <span>No matching account was found on this Matrix homeserver. Ask the person to create an account there, then search for their full Matrix ID.</span>
               </div>
             ) : (
               <div className="results-list">
@@ -207,19 +185,6 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
                   );
                 })}
 
-                {/* Always offer direct start button for query if not already in list */}
-                {!searchResults.some(u => u.username.toLowerCase() === cleanQuery.toLowerCase() || u.tag.toLowerCase() === `@${cleanQuery.toLowerCase()}`) && (
-                  <div className="direct-fallback-banner" style={{ marginTop: '10px', padding: '8px', border: '1px dashed var(--border)', borderRadius: '4px', textAlign: 'center' }}>
-                    <button
-                      className="cyber-btn btn-secondary btn-sm"
-                      onClick={() => handleDirectStart(cleanQuery)}
-                      style={{ width: '100%' }}
-                    >
-                      <Zap size={12} className="text-accent" />
-                      <span>START CHAT WITH UNLISTED NODE @{cleanQuery}</span>
-                    </button>
-                  </div>
-                )}
               </div>
             )}
           </div>

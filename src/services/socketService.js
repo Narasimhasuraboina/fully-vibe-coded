@@ -1,420 +1,452 @@
-import { io } from 'socket.io-client';
+import { loadDurableData, saveDurableData } from './storage';
 
-class RealtimeSocketService {
+const DEFAULT_HOMESERVER = 'https://matrix.org';
+const CHAT_EVENT_TYPE = 'm.room.message';
+
+class MatrixChatService {
   constructor() {
-    this.socket = null;
+    this.client = null;
     this.isConnected = false;
     this.currentProfile = null;
-    this.listeners = new Map();
     this.callbacks = {};
+    this.eventByMessageId = new Map();
+    this.roomByPeer = new Map();
+    this.started = false;
+    this.startPromise = null;
+    this.libraryPromise = null;
+    this.sdk = null;
+    this.encryptAttachment = null;
+    this.decryptAttachment = null;
+    this.deriveRecoveryKeyFromPassphrase = null;
+    this.cryptoPromise = null;
+    this.cryptoReady = false;
+  }
+
+  async loadLibraries() {
+    if (!this.libraryPromise) {
+      this.libraryPromise = Promise.all([
+        import('matrix-js-sdk'),
+        import('matrix-js-sdk/lib/crypto-api/key-passphrase'),
+        import('matrix-encrypt-attachment'),
+      ]).then(([matrix, keyPassphrase, attachments]) => {
+        this.sdk = matrix;
+        this.deriveRecoveryKeyFromPassphrase = keyPassphrase.deriveRecoveryKeyFromPassphrase;
+        this.encryptAttachment = attachments.encryptAttachment;
+        this.decryptAttachment = attachments.decryptAttachment;
+      }).catch((error) => {
+        this.libraryPromise = null;
+        throw error;
+      });
+    }
+    await this.libraryPromise;
   }
 
   setListeners(callbacks = {}) {
     this.callbacks = { ...this.callbacks, ...callbacks };
   }
 
-  getServerUrl() {
-    if (typeof window === 'undefined') return 'http://localhost:3001';
-    if (window.location.port === '5173') {
-      return `http://${window.location.hostname}:3001`;
+  homeserverUrl() {
+    return (import.meta.env?.VITE_MATRIX_HOMESERVER_URL || DEFAULT_HOMESERVER).replace(/\/$/, '');
+  }
+
+  createClient(session, password = '') {
+    const callbacks = {
+      getSecretStorageKey: async ({ keys }) => {
+        if (!password) throw new Error('Sign in again with your password to unlock the encrypted key backup.');
+        for (const [keyId, keyInfo] of Object.entries(keys || {})) {
+          const passphrase = keyInfo?.passphrase;
+          if (passphrase?.salt && passphrase?.iterations) {
+            const key = await this.deriveRecoveryKeyFromPassphrase(password, passphrase.salt, passphrase.iterations);
+            return [keyId, key];
+          }
+        }
+        return null;
+      },
+    };
+    return this.sdk.createClient({
+      baseUrl: session.homeserver || this.homeserverUrl(),
+      accessToken: session.sessionToken,
+      userId: session.matrixUserId || session.tag,
+      deviceId: session.deviceId,
+      refreshToken: session.refreshToken,
+      onTokenRefresh: (tokens) => {
+        this.currentProfile = { ...this.currentProfile, sessionToken: tokens.accessToken, refreshToken: tokens.refreshToken };
+        this.callbacks.onProfileUpdated?.(this.currentProfile);
+      },
+      cryptoCallbacks: callbacks,
+    });
+  }
+
+  async initializeCrypto(client, password = '') {
+    if (this.cryptoReady) return;
+    if (!this.cryptoPromise) {
+      this.cryptoPromise = (async () => {
+        await client.initRustCrypto();
+        if (password) {
+          const crypto = client.getCrypto();
+          await crypto.bootstrapSecretStorage({
+            createSecretStorageKey: () => crypto.createRecoveryKeyFromPassphrase(password),
+            setupNewKeyBackup: true,
+          });
+          await crypto.checkKeyBackupAndEnable();
+        }
+      })().then(() => { this.cryptoReady = true; }).catch((error) => {
+        this.cryptoPromise = null;
+        throw error;
+      });
     }
-    return window.location.origin;
+    await this.cryptoPromise;
   }
 
-  initSocket() {
-    if (this.socket) return this.socket;
-
-    const serverUrl = this.getServerUrl();
-    this.socket = io(serverUrl, {
-      transports: ['websocket', 'polling'],
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
-    });
-
-    this.socket.on('connect', () => {
-      this.isConnected = true;
-      console.log('[REALTIME] Connected to Chatforge Relay Server at', serverUrl);
-    });
-
-    this.socket.on('disconnect', () => {
-      this.isConnected = false;
-      console.log('[REALTIME] Disconnected from Relay Server');
-    });
-
-    return this.socket;
-  }
-
-  // Authenticate / Register with Password (with resilient timeout & offline fallback)
   authenticateUser(authData, callback) {
-    let responded = false;
-    let timeoutId = null;
+    this.authenticate(authData).then((response) => callback?.(response)).catch((error) => {
+      callback?.({ success: false, error: this.describeError(error) });
+    });
+  }
 
-    const safeCallback = (res) => {
-      if (responded) return;
-      responded = true;
-      if (timeoutId) clearTimeout(timeoutId);
-      if (typeof callback === 'function') callback(res);
+  async authenticate({ username, password, isRegisterMode }) {
+    await this.loadLibraries();
+    const cleanUsername = String(username || '').trim().replace(/^@/, '').toLowerCase();
+    const homeserver = this.homeserverUrl();
+    const unauthenticatedClient = sdk.createClient({ baseUrl: homeserver });
+    let authResponse;
+
+    if (isRegisterMode) {
+      authResponse = await unauthenticatedClient.register(
+        cleanUsername,
+        password,
+        null,
+        { type: 'm.login.dummy' },
+        undefined,
+        undefined,
+        false,
+      );
+    } else {
+      authResponse = await unauthenticatedClient.loginRequest({
+        type: 'm.login.password',
+        identifier: { type: 'm.id.user', user: cleanUsername },
+        password,
+        initial_device_display_name: 'Chatforge Web',
+      });
+    }
+
+    const matrixUserId = authResponse.user_id;
+    if (!matrixUserId || !authResponse.access_token) throw new Error('This homeserver requires an extra registration step. Use an existing Matrix account, or complete its registration verification first.');
+    const profile = {
+      username: matrixUserId.split(':')[0].slice(1),
+      tag: matrixUserId,
+      matrixUserId,
+      deviceId: authResponse.device_id,
+      avatar: '',
+      sessionToken: authResponse.access_token,
+      refreshToken: authResponse.refresh_token,
+      homeserver,
     };
 
-    // Never grant an authenticated session without a server response.
-    timeoutId = setTimeout(() => {
-      safeCallback({ success: false, error: 'Relay server did not respond. Check the connection and try again.' });
-    }, 4500);
-
-    const socket = this.initSocket();
-
-    if (socket && socket.connected) {
-      socket.emit('authenticate_user', authData, (res) => {
-        safeCallback(res);
-      });
-    } else if (socket) {
-      socket.once('connect', () => {
-        socket.emit('authenticate_user', authData, (res) => {
-          safeCallback(res);
-        });
-      });
-      socket.once('connect_error', () => {
-        safeCallback({ success: false, error: 'Could not connect to the relay server.' });
-      });
-    } else {
-      safeCallback({ success: false, error: 'Could not initialize a relay connection.' });
-    }
+    this.client = this.createClient(profile, password);
+    this.currentProfile = profile;
+    await this.initializeCrypto(this.client, password);
+    this.bindClientEvents();
+    await this.startClient();
+    return { success: true, peerInfo: profile, sessionToken: profile.sessionToken };
   }
 
   connect(profile, callbacks = {}) {
     this.currentProfile = profile;
-    if (callbacks && typeof callbacks === 'object') {
-      this.callbacks = { ...this.callbacks, ...callbacks };
-    }
-    const serverUrl = this.getServerUrl();
-
-    if (!this.socket) {
-      this.socket = io(serverUrl, {
-        transports: ['websocket', 'polling'],
-        reconnection: true,
-        reconnectionAttempts: Infinity,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-      });
-    }
-
-    // Cleanly rebind listeners on the existing socket
-    this.socket.removeAllListeners();
-
-    this.socket.on('connect', () => {
-      this.isConnected = true;
-      console.log('[REALTIME] Connected to Relay Server (Socket ID: ' + this.socket.id + ')');
-      
-      // If user has credentials, authenticate securely
-      if (this.currentProfile) {
-        this.socket.emit('authenticate_user', {
-          username: this.currentProfile.username,
-          password: this.currentProfile.password,
-          avatar: this.currentProfile.avatar,
-          customStatus: this.currentProfile.customStatus,
-          isRegisterMode: false,
-        }, (res) => {
-          if (res && res.success) {
-            if (this.callbacks.onRegistered) this.callbacks.onRegistered(res);
-          }
-        });
-      }
-
-      if (this.callbacks.onConnect) this.callbacks.onConnect();
-    });
-
-    // If socket is already active and connected, authenticate immediately
-    if (this.socket.connected && this.currentProfile) {
-      this.isConnected = true;
-      this.socket.emit('authenticate_user', {
-        username: this.currentProfile.username,
-        password: this.currentProfile.password,
-        avatar: this.currentProfile.avatar,
-        customStatus: this.currentProfile.customStatus,
-        isRegisterMode: false,
-      }, (res) => {
-        if (res && res.success) {
-          if (this.callbacks.onRegistered) this.callbacks.onRegistered(res);
-        }
-      });
-      if (this.callbacks.onConnect) this.callbacks.onConnect();
-    }
-
-    this.socket.on('disconnect', () => {
-      this.isConnected = false;
-      console.log('[REALTIME] Disconnected from Relay Server');
-      if (this.callbacks.onDisconnect) this.callbacks.onDisconnect();
-    });
-
-    this.socket.on('registered', (data) => {
-      if (this.callbacks.onRegistered) this.callbacks.onRegistered(data);
-    });
-
-    this.socket.on('online_peers_list', (peers) => {
-      if (this.callbacks.onPeersUpdate) this.callbacks.onPeersUpdate(peers);
-    });
-
-    this.socket.on('peer_online_event', ({ peer }) => {
-      if (this.callbacks.onPeerOnline) this.callbacks.onPeerOnline(peer);
-      // Auto flush pending outbox for this newly online peer
-      this.flushOutboxForPeer(peer.tag, this.callbacks.onOutboxMessageDispatched);
-    });
-
-    this.socket.on('peer_offline_event', (data) => {
-      if (this.callbacks.onPeerOffline) this.callbacks.onPeerOffline(data);
-    });
-
-    this.socket.on('receive_message', (payload) => {
-      if (this.callbacks.onReceiveMessage) this.callbacks.onReceiveMessage(payload);
-    });
-
-    this.socket.on('message_delivered_ack', (ack) => {
-      if (this.callbacks.onMessageDelivered) this.callbacks.onMessageDelivered(ack);
-      if (this.callbacks.onMessageStatusUpdate) {
-        this.callbacks.onMessageStatusUpdate({ messageId: ack?.messageId, status: 'delivered' });
-      }
-    });
-
-    this.socket.on('message_read_ack', (data) => {
-      if (this.callbacks.onMessageStatusUpdate) {
-        this.callbacks.onMessageStatusUpdate({ messageId: data?.messageId, status: 'read' });
-      }
-    });
-
-    this.socket.on('message_reacted', (data) => {
-      if (this.callbacks.onMessageReacted) this.callbacks.onMessageReacted(data);
-    });
-
-    this.socket.on('message_deleted', (data) => {
-      if (this.callbacks.onMessageDeleted) this.callbacks.onMessageDeleted(data);
-    });
-
-    this.socket.on('message_queued_server_ack', (data) => {
-      if (this.callbacks.onMessageQueuedInServerMailbox) this.callbacks.onMessageQueuedInServerMailbox(data);
-    });
-
-    this.socket.on('message_rejected', (data) => {
-      if (this.callbacks.onMessageRejected) this.callbacks.onMessageRejected(data);
-    });
-
-    this.socket.on('rate_limit_exceeded', (data) => {
-      if (this.callbacks.onRateLimitExceeded) this.callbacks.onRateLimitExceeded(data);
-    });
-
-    this.socket.on('mailbox_delivered_summary', (data) => {
-      if (this.callbacks.onMailboxDeliveredSummary) this.callbacks.onMailboxDeliveredSummary(data);
-    });
-
-    this.socket.on('peer_offline_ack', (ack) => {
-      if (this.callbacks.onPeerOfflineAck) this.callbacks.onPeerOfflineAck(ack);
-    });
-
-    this.socket.on('message_viewed_by_peer', (data) => {
-      if (this.callbacks.onMessageViewedByPeer) this.callbacks.onMessageViewedByPeer(data);
-    });
-
-    this.socket.on('message_shredded_ack', (data) => {
-      if (this.callbacks.onMessageShredded) this.callbacks.onMessageShredded(data);
-    });
-
-    this.socket.on('peer_typing', (data) => {
-      if (this.callbacks.onPeerTyping) this.callbacks.onPeerTyping(data);
-      if (this.callbacks.onTyping) this.callbacks.onTyping(data);
+    this.callbacks = { ...this.callbacks, ...callbacks };
+    Promise.resolve().then(() => this.loadLibraries()).then(async () => {
+      if (!this.client) this.client = this.createClient(profile);
+      this.bindClientEvents();
+      await this.initializeCrypto(this.client);
+      await this.startClient();
+    }).catch((error) => {
+      this.callbacks.onSessionExpired?.({ error: this.describeError(error) });
     });
   }
 
-  // Send message through real-time socket
+  bindClientEvents() {
+    if (!this.client || this.started) return;
+    this.started = true;
+    this.client.on(this.sdk.ClientEvent.Sync, (state) => {
+      if (state === this.sdk.SyncState.Prepared || state === this.sdk.SyncState.Syncing) {
+        const wasConnected = this.isConnected;
+        this.isConnected = true;
+      if (!wasConnected) {
+          this.callbacks.onConnect?.();
+          this.callbacks.onRegistered?.({ success: true });
+          this.emitPeerDirectory();
+          this.flushOutbox();
+        }
+      } else if (state === sdk.SyncState.Error) {
+        this.isConnected = false;
+        this.callbacks.onDisconnect?.();
+      }
+    });
+    this.client.on(this.sdk.RoomEvent.Timeline, (event, room, toStartOfTimeline) => {
+      if (toStartOfTimeline || !room) return;
+      const type = event.getType();
+      if (type === CHAT_EVENT_TYPE && room.hasEncryptionStateEvent()) this.handleRoomMessage(event, room);
+      else if (type === 'm.room.member') this.emitPeerDirectory();
+    });
+    this.client.on(this.sdk.RoomEvent.MyMembership, (room, membership) => {
+      if (membership === this.sdk.KnownMembership.Invite) this.client.joinRoom(room.roomId).catch(() => {});
+    });
+  }
+
+  async startClient() {
+    if (!this.client || this.startPromise) return this.startPromise;
+    this.startPromise = this.client.startClient({ initialSyncLimit: 30 }).finally(() => {
+      this.startPromise = null;
+    });
+    return this.startPromise;
+  }
+
+  emitPeerDirectory() {
+    const directEvent = this.client?.getAccountData('m.direct');
+    const directRooms = directEvent?.getContent?.() || {};
+    const contacts = Object.entries(directRooms).flatMap(([peerId, roomIds]) => {
+      const roomId = roomIds?.[0];
+      if (roomId) this.roomByPeer.set(peerId, roomId);
+      return [{ tag: peerId, username: peerId.split(':')[0].slice(1), id: `peer_${peerId}`, status: 'offline', lastSeen: 'offline' }];
+    });
+    this.callbacks.onPeersUpdate?.(contacts);
+  }
+
+  handleRoomMessage(event, room) {
+    const content = event.getContent?.() || {};
+    let message;
+    try { message = JSON.parse(content.body || ''); } catch { return; }
+    if (!message?.id) return;
+    const senderTag = event.getSender();
+    this.eventByMessageId.set(message.id, { event, roomId: room.roomId, senderTag });
+    this.decryptMessageAttachment(message).then((decryptedMessage) => {
+      this.deliverIncomingMessage(decryptedMessage, event, room, senderTag);
+    }).catch((error) => {
+      this.callbacks.onMessageRejected?.({ messageId: message.id, error: `Could not decrypt attachment: ${this.describeError(error)}` });
+    });
+  }
+
+  async decryptMessageAttachment(message) {
+    const encryptedFile = message.encryptedFile;
+    if (!encryptedFile?.url || !encryptedFile.info) return message;
+    const url = this.client.mxcUrlToHttp(encryptedFile.url, undefined, undefined, undefined, false, false, true);
+    if (!url) throw new Error('The homeserver returned an invalid media URL.');
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${this.currentProfile.sessionToken}` } });
+    if (!response.ok) throw new Error(`Encrypted attachment download failed (${response.status}).`);
+    const plaintext = await this.decryptAttachment(await response.arrayBuffer(), encryptedFile.info);
+    const blob = new Blob([plaintext], { type: encryptedFile.contentType || 'application/octet-stream' });
+    const data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error || new Error('Could not read the decrypted attachment.'));
+      reader.readAsDataURL(blob);
+    });
+    const { encryptedFile: _encryptedFile, ...cleanMessage } = message;
+    const file = { ...(message.file || {}), data, url: data, type: encryptedFile.contentType || message.file?.type };
+    return { ...cleanMessage, file, mediaUrl: data, audioUrl: message.type === 'audio' ? data : message.audioUrl };
+  }
+
+  deliverIncomingMessage(message, event, room, senderTag) {
+    this.eventByMessageId.set(message.id, { event, roomId: room.roomId, senderTag });
+    if (senderTag === this.currentProfile?.matrixUserId) {
+      const recipient = room.getMembers().find((member) => member.userId !== senderTag);
+      const recipientTag = recipient?.userId;
+      if (recipientTag) this.callbacks.onOwnMessageReceived?.({ message, recipientTag, matrixEvent: event });
+      return;
+    }
+    const onMessageReceived = this.callbacks.onMessageReceived || this.callbacks.onReceiveMessage;
+    onMessageReceived?.({
+      message,
+      senderTag,
+      senderInfo: { tag: senderTag, username: senderTag?.split(':')[0]?.slice(1) },
+      matrixEvent: event,
+    });
+    this.callbacks.onMessageStatusUpdate?.({ messageId: message.id, status: 'delivered' });
+  }
+
+  async getDirectRoom(peerId) {
+    const cached = this.roomByPeer.get(peerId);
+    if (cached && this.client.getRoom(cached)) return this.ensureRoomEncryption(cached);
+    const directContent = this.client.getAccountData('m.direct')?.getContent?.() || {};
+    for (const roomId of directContent[peerId] || []) {
+      if (this.client.getRoom(roomId)) {
+        this.roomByPeer.set(peerId, roomId);
+        return this.ensureRoomEncryption(roomId);
+      }
+    }
+    const room = await this.client.createRoom({
+      invite: [peerId],
+      is_direct: true,
+      name: peerId,
+      preset: 'trusted_private_chat',
+      initial_state: [{
+        type: 'm.room.encryption',
+        state_key: '',
+        content: { algorithm: 'm.megolm.v1.aes-sha2' },
+      }],
+    });
+    this.roomByPeer.set(peerId, room.room_id);
+    const updatedDirectRooms = { ...directContent, [peerId]: [...new Set([...(directContent[peerId] || []), room.room_id])] };
+    await this.client.setAccountData('m.direct', updatedDirectRooms);
+    return this.ensureRoomEncryption(room.room_id);
+  }
+
+  async ensureRoomEncryption(roomId) {
+    const room = this.client.getRoom(roomId);
+    if (!room) throw new Error('The Matrix room is not available yet.');
+    if (!room.hasEncryptionStateEvent()) {
+      await this.client.sendStateEvent(roomId, 'm.room.encryption', { algorithm: 'm.megolm.v1.aes-sha2' }, '');
+    }
+    if (!this.client.getRoom(roomId)?.hasEncryptionStateEvent()) throw new Error('Could not enable Matrix encryption for this room.');
+    return roomId;
+  }
+
   sendMessage(recipientTag, message) {
-    if (!this.socket || !this.isConnected) {
-      // Offline -> save to outbox
+    if (!this.client || !this.isConnected) {
       this.saveToOutbox(recipientTag, message);
       return false;
     }
-
-    this.socket.emit('send_message', {
-      recipientTag,
-      senderTag: this.currentProfile?.tag,
-      senderAvatar: this.currentProfile?.avatar,
-      message,
+    this.sendEncryptedMessage(recipientTag, message).catch((error) => {
+      this.callbacks.onMessageRejected?.({ messageId: message?.id, error: this.describeError(error) });
     });
     return true;
   }
 
-  // Search registered users by username (dual socket + REST API for maximum reliability)
-  async searchUsers(query, callback) {
-    const cleanQ = (query || '').trim().replace(/^@/, '');
-    if (!cleanQ) {
-      if (typeof callback === 'function') callback([]);
-      return;
+  async sendEncryptedMessage(recipientTag, message) {
+    const peerId = String(recipientTag || '');
+    if (!/^@[A-Za-z0-9._=/-]+:[A-Za-z0-9.-]+(?::\d+)?$/.test(peerId)) throw new Error('Choose a registered Matrix user before sending.');
+    const roomId = await this.getDirectRoom(peerId);
+    const messagePayload = { ...message };
+    const attachmentData = message.file?.data || message.mediaUrl || message.audioUrl;
+    if (typeof attachmentData === 'string' && /^(data:|blob:)/.test(attachmentData)) {
+      const sourceBlob = await fetch(attachmentData).then((response) => response.blob());
+      const { data, info } = await this.encryptAttachment(await sourceBlob.arrayBuffer());
+      const encryptedUpload = await this.client.uploadContent(new Blob([data], { type: 'application/octet-stream' }), {
+        includeFilename: false,
+        type: 'application/octet-stream',
+      });
+      messagePayload.encryptedFile = {
+        url: encryptedUpload.content_uri,
+        info,
+        contentType: sourceBlob.type || message.file?.type || 'application/octet-stream',
+      };
+      messagePayload.file = message.file ? { ...message.file, data: null, url: null } : null;
+      messagePayload.mediaUrl = null;
+      messagePayload.audioUrl = null;
     }
+    const content = { msgtype: 'm.text', body: JSON.stringify(messagePayload) };
+    const response = await this.client.sendEvent(roomId, CHAT_EVENT_TYPE, content);
+    if (message?.id) this.eventByMessageId.set(message.id, { eventId: response.event_id, roomId, senderTag: peerId });
+    this.callbacks.onMessageStatusUpdate?.({ messageId: message?.id, status: 'delivered' });
+  }
 
-    let completed = false;
-    const safeCallback = (results) => {
-      if (completed) return;
-      completed = true;
-      if (typeof callback === 'function') callback(results || []);
-    };
+  async searchUsers(query, callback) {
+    try {
+      const result = await this.client.searchUserDirectory({ term: String(query || '').trim().replace(/^@/, ''), limit: 20 });
+      const matches = (result?.results || []).map((user) => ({
+        id: user.user_id,
+        tag: user.user_id,
+        username: user.display_name || user.user_id.split(':')[0].slice(1),
+        avatar: user.avatar_url ? this.client.mxcUrlToHttp(user.avatar_url) : '',
+        status: 'offline',
+        lastSeen: 'offline',
+      }));
+      callback?.(matches);
+    } catch {
+      callback?.([]);
+    }
+  }
 
-    // 1. Try Socket Search
-    if (this.socket && (this.isConnected || this.socket.connected)) {
-      this.socket.emit('search_users', { query: cleanQ }, (results) => {
-        if (Array.isArray(results)) {
-          safeCallback(results);
-        }
+  async emitReadReceipt(messageId) {
+    const item = this.eventByMessageId.get(messageId);
+    if (item?.event) await this.client.sendReadReceipt(item.event);
+  }
+
+  emitDeliveryReceipt(messageId) { this.emitReadReceipt(messageId); }
+
+  emitTyping(recipientTag, isTyping) {
+    const roomId = this.roomByPeer.get(recipientTag);
+    if (roomId) this.client.sendTyping(roomId, Boolean(isTyping), isTyping ? 5000 : 1000).catch(() => {});
+  }
+
+  async emitReaction(messageId, _recipientTag, emoji) {
+    const item = this.eventByMessageId.get(messageId);
+    const eventId = item?.event?.getId?.() || item?.eventId;
+    if (item?.roomId && eventId) {
+      await this.client.sendEvent(item.roomId, 'm.reaction', {
+        'm.relates_to': { rel_type: 'm.annotation', event_id: eventId, key: emoji },
       });
     }
-
-    // 2. Concurrently try HTTP REST Search
-    try {
-      const serverUrl = this.getServerUrl();
-      const res = await fetch(`${serverUrl}/api/search?q=${encodeURIComponent(cleanQ)}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data)) {
-          safeCallback(data);
-        }
-      }
-    } catch {
-      // Ignore network errors in REST fallback
-    }
-
-    // 3. Fallback timeout if neither responded
-    setTimeout(() => {
-      safeCallback([]);
-    }, 1200);
   }
 
-  // Notify sender that message has been viewed (triggering 1-view burn countdown)
-  emitMessageViewed(messageId, senderTag, burnDelay = 10) {
-    if (this.socket && this.isConnected) {
-      this.socket.emit('message_viewed', { messageId, senderTag, burnDelay });
-    }
+  async emitMessageDelete(messageId) {
+    const item = this.eventByMessageId.get(messageId);
+    const eventId = item?.event?.getId?.() || item?.eventId;
+    if (item?.roomId && eventId) await this.client.redactEvent(item.roomId, eventId);
   }
 
-  // Notify peer that message has been shredded
-  emitMessageShredded(messageId, targetTag) {
-    if (this.socket && this.isConnected) {
-      this.socket.emit('message_shredded', { messageId, targetTag });
-    }
-  }
+  emitMessageViewed(messageId) { this.emitReadReceipt(messageId); }
+  emitMessageShredded(messageId) { this.emitMessageDelete(messageId); }
 
-  // Typing indicator
-  emitTyping(recipientTag, isTyping) {
-    if (this.socket && this.isConnected) {
-      this.socket.emit('typing_indicator', { recipientTag, isTyping });
-    }
-  }
-
-  // Delivery confirmation receipt
-  emitDeliveryReceipt(messageId, recipientTag) {
-    if (this.socket && this.isConnected) {
-      this.socket.emit('delivery_receipt', { messageId, recipientTag });
-    }
-  }
-
-  // Read receipt (blue tick protocol)
-  emitReadReceipt(messageId, senderTag) {
-    if (this.socket && this.isConnected) {
-      this.socket.emit('message_read', { messageId, senderTag });
-    }
-  }
-
-  // Emoji reaction relay
-  emitReaction(messageId, recipientTag, emoji) {
-    if (this.socket && this.isConnected) {
-      this.socket.emit('message_reaction', { messageId, recipientTag, emoji });
-    }
-  }
-
-  // Delete message for everyone
-  emitMessageDelete(messageId, targetTag) {
-    if (this.socket && this.isConnected) {
-      this.socket.emit('delete_message', { messageId, targetTag });
-    }
-  }
-
-  // Generic emit helper
   emit(event, data, callback) {
-    if (this.socket && this.isConnected) {
-      if (typeof callback === 'function') {
-        this.socket.emit(event, data, callback);
-      } else {
-        this.socket.emit(event, data);
-      }
+    if (event === 'update_profile') {
+      this.client?.setDisplayName(data?.customStatus || this.currentProfile?.username).then(() => callback?.({ success: true })).catch((error) => callback?.({ success: false, error: this.describeError(error) }));
     }
+  }
+
+  async logoutSession() {
+    const client = this.client;
+    try { await client?.logout(); } catch { /* Local logout still completes if the homeserver is unavailable. */ }
+    this.disconnect();
   }
 
   disconnect() {
-    if (this.socket) this.socket.disconnect();
-    this.socket = null;
     this.isConnected = false;
+    this.started = false;
+    this.cryptoReady = false;
+    this.cryptoPromise = null;
+    this.client?.stopClient();
+    this.client = null;
     this.currentProfile = null;
+    this.roomByPeer.clear();
+    this.eventByMessageId.clear();
   }
 
-  // SENDER-SIDE OFFLINE OUTBOX STORAGE (Zero Server Knowledge)
+  describeError(error) {
+    const message = String(error?.data?.error || error?.message || 'Homeserver request failed.');
+    if (/M_FORBIDDEN|M_UNKNOWN_TOKEN|invalid username|invalid password/i.test(message)) return 'Sign-in failed. Check the username and password.';
+    if (/M_USER_IN_USE|already in use/i.test(message)) return 'That username is already registered on this homeserver.';
+    if (/M_REGISTRATION_DISABLED/i.test(message)) return 'This homeserver has disabled public registration.';
+    return message.slice(0, 240);
+  }
+
   getOutboxStorageKey() {
-    const tag = this.currentProfile?.tag || this.currentProfile?.username || 'anonymous';
-    const safeTag = String(tag).trim().toLowerCase().replace(/[^a-z0-9_@-]/g, '_');
-    return `chatforge_account_${safeTag}_offline_outbox`;
+    const tag = this.currentProfile?.tag || 'anonymous';
+    return `account_${String(tag).toLowerCase().replace(/[^a-z0-9_@.-]/g, '_')}_offline_outbox`;
+  }
+  async getOutbox() {
+    const outbox = await loadDurableData(this.getOutboxStorageKey(), []);
+    return Array.isArray(outbox) ? outbox : [];
+  }
+  async saveToOutbox(recipientTag, message) {
+    const queue = await this.getOutbox();
+    await saveDurableData(this.getOutboxStorageKey(), [...queue.filter((item) => item.id !== message.id), { id: message.id, recipientTag, message, savedAt: Date.now() }]);
+  }
+  async removeFromOutbox(messageId) {
+    await saveDurableData(this.getOutboxStorageKey(), (await this.getOutbox()).filter((item) => item.id !== messageId));
   }
 
-  getOutbox() {
-    try {
-      const raw = localStorage.getItem(this.getOutboxStorageKey());
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  }
-
-  saveToOutbox(recipientTag, message) {
-    try {
-      const cleanTag = (recipientTag || '').toLowerCase().trim();
-      const outbox = this.getOutbox();
-      const entry = {
-        id: message.id,
-        recipientTag: cleanTag,
-        message,
-        savedAt: Date.now(),
-      };
-      // Prevent duplicates
-      const filtered = outbox.filter(item => item.id !== message.id);
-      filtered.push(entry);
-      localStorage.setItem(this.getOutboxStorageKey(), JSON.stringify(filtered));
-      console.log(`[OUTBOX] Message ${message.id} queued in sender local storage for offline peer ${cleanTag}`);
-    } catch (e) {
-      console.error('[OUTBOX] Error saving to outbox', e);
-    }
-  }
-
-  removeFromOutbox(messageId) {
-    try {
-      const outbox = this.getOutbox();
-      const filtered = outbox.filter(item => item.id !== messageId);
-      localStorage.setItem(this.getOutboxStorageKey(), JSON.stringify(filtered));
-    } catch (e) {
-      console.error('[OUTBOX] Error removing from outbox', e);
-    }
-  }
-
-  // Flush Outbox when recipient comes online
-  flushOutboxForPeer(peerTag, onDispatchCallback) {
-    const cleanPeerTag = (peerTag || '').toLowerCase().trim();
-    const outbox = this.getOutbox();
-    const pendingForPeer = outbox.filter(item => (item.recipientTag || '').toLowerCase().trim() === cleanPeerTag);
-
-    if (pendingForPeer.length > 0) {
-      console.log(`[OUTBOX FLUSH] Peer ${cleanPeerTag} is now ONLINE! Flushing ${pendingForPeer.length} queued messages...`);
-      pendingForPeer.forEach((item) => {
-        // Send to peer now
-        this.sendMessage(item.recipientTag, item.message);
-        this.removeFromOutbox(item.id);
-        if (onDispatchCallback) {
-          onDispatchCallback(item.recipientTag, item.message);
-        }
-      });
+  async flushOutbox() {
+    for (const item of await this.getOutbox()) {
+      try {
+        await this.sendEncryptedMessage(item.recipientTag, item.message);
+        await this.removeFromOutbox(item.id);
+        this.callbacks.onOutboxMessageDispatched?.(item.recipientTag, item.message);
+      } catch (error) {
+        this.callbacks.onMessageRejected?.({ messageId: item.id, error: this.describeError(error) });
+      }
     }
   }
 }
 
-export const socketService = new RealtimeSocketService();
+export const socketService = new MatrixChatService();

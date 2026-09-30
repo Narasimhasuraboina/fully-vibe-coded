@@ -142,10 +142,12 @@ export const Sidebar = () => {
           const isContactTyping = typingStatus[contact.id];
 
           return (
-            <div
+            <button
+              type="button"
               key={contact.id}
               className={`chat-item ${isSelected ? 'active' : ''}`}
               onClick={() => selectContact(contact.id)}
+              aria-current={isSelected ? 'true' : undefined}
             >
               {/* Avatar with Status Dot */}
               <div className="relative flex-shrink-0">
@@ -208,7 +210,7 @@ export const Sidebar = () => {
                   )}
                 </div>
               </div>
-            </div>
+            </button>
           );
         })}
 
@@ -219,7 +221,8 @@ export const Sidebar = () => {
               DISCOVERED NETWORK NODES ({networkResults.length})
             </div>
             {networkResults.map((user) => (
-              <div
+              <button
+                type="button"
                 key={user.tag}
                 className="chat-item hover:bg-bg-card-hover cursor-pointer rounded p-2 mb-1"
                 onClick={() => {
@@ -238,7 +241,7 @@ export const Sidebar = () => {
                   <span className="text-[11px] text-accent">{user.tag}</span>
                 </div>
                 <UserPlus size={14} className="text-accent ml-auto" />
-              </div>
+              </button>
             ))}
           </div>
         )}

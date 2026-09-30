@@ -4,7 +4,7 @@ import { useChat } from '../../context/useChat';
 import { notificationService } from '../../services/notificationService';
 
 const EMOJI_LIST = ['👍', '❤️', '🔥', '⚡', '🤖', '💀', '🛡️', '🔒', '👀', '🚀'];
-const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
+const MAX_FILE_SIZE = 18 * 1024 * 1024; // Keep encrypted uploads practical for browser memory and Matrix homeservers.
 
 export const MessageInput = () => {
   const { sendMessage, emitTyping, activeContact } = useChat();
@@ -51,8 +51,8 @@ export const MessageInput = () => {
 
     if (file.size > MAX_FILE_SIZE) {
       notificationService.pushToast({
-        title: 'PAYLOAD SIZE EXCEEDED',
-        message: `Selected file (${formatFileSize(file.size)}) exceeds the 25MB limit.`,
+        title: 'FILE TOO LARGE',
+        message: `Selected file (${formatFileSize(file.size)}) exceeds the 18 MB limit.`,
         type: 'warning',
       });
       e.target.value = '';
@@ -149,7 +149,8 @@ export const MessageInput = () => {
         <button
           type="button"
           className="cyber-btn btn-icon"
-          title="Attach File / Image"
+          title="Attach file or image"
+          aria-label="Attach file or image"
           onClick={() => fileInputRef.current?.click()}
         >
           <Paperclip size={16} />
@@ -158,7 +159,8 @@ export const MessageInput = () => {
         <button
           type="button"
           className="cyber-btn btn-icon"
-          title="Insert Emoji"
+          title="Choose emoji"
+          aria-label="Choose emoji"
           onClick={() => setShowEmojiPicker(!showEmojiPicker)}
         >
           <Smile size={16} />
@@ -167,7 +169,8 @@ export const MessageInput = () => {
         <input
           type="text"
           className="cyber-input flex-1"
-          placeholder={activeContact ? `Transmit to ${activeContact.name || activeContact.tag}...` : 'Write message...'}
+          placeholder={activeContact ? `Message ${activeContact.name || activeContact.tag}…` : 'Write a message…'}
+          aria-label={activeContact ? `Message ${activeContact.name || activeContact.tag}` : 'Write a message'}
           value={text}
           onChange={handleInputChange}
           onBlur={handleInputBlur}
@@ -178,7 +181,8 @@ export const MessageInput = () => {
           type="submit"
           disabled={!text.trim() && !attachment}
           className="cyber-btn py-2 px-3 font-bold disabled:opacity-40"
-          title="Send Encrypted Message"
+        title="Send message"
+        aria-label="Send message"
         >
           <Send size={15} />
         </button>

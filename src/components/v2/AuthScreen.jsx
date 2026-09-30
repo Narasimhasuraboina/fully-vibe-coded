@@ -29,8 +29,8 @@ export const AuthScreen = () => {
     e.preventDefault();
     const cleanUser = username.trim().replace(/^@/, '');
 
-    if (cleanUser.length < 2) {
-      setErrorMsg('Codename must be at least 2 characters.');
+    if (cleanUser.length < 2 || cleanUser.length > 32) {
+      setErrorMsg('Username must be 2 to 32 characters.');
       soundFX.playGlitchAlarm();
       return;
     }
@@ -41,8 +41,8 @@ export const AuthScreen = () => {
       return;
     }
 
-    if (!password || password.length < 4) {
-      setErrorMsg('Password must be at least 4 characters.');
+    if (!password || password.length < (authMode === 'register' ? 10 : 4)) {
+      setErrorMsg(authMode === 'register' ? 'Use a password with at least 10 characters.' : 'Password must be at least 4 characters.');
       soundFX.playGlitchAlarm();
       return;
     }
@@ -61,7 +61,6 @@ export const AuthScreen = () => {
       username: cleanUser,
       password,
       avatar,
-      customStatus: 'Operating on P2P Mesh',
       isRegisterMode: authMode === 'register',
     };
 
@@ -73,80 +72,80 @@ export const AuthScreen = () => {
         setTimeout(() => {
           login({
             ...res.peerInfo,
-            password,
+            sessionToken: res.sessionToken,
           });
         }, 500);
       } else {
         soundFX.playGlitchAlarm();
-        setErrorMsg(res?.error || 'Authentication rejected by relay server.');
+        setErrorMsg(res?.error || 'The Matrix homeserver rejected the request.');
       }
     });
   };
 
   return (
-    <div className="login-gateway-root flex items-center justify-center p-4 min-h-screen">
-      <div className="login-card w-full max-w-md bg-bg-card border border-border rounded-lg p-6 shadow-2xl relative">
+    <main className="login-gateway-root">
+      <div className="login-card">
         {/* Terminal Header */}
-        <div className="flex items-center justify-between pb-4 mb-4 border-b border-border">
-          <div className="flex items-center gap-2">
-            <Terminal size={20} className="text-accent" />
-            <span className="font-bold tracking-wider text-sm text-text-main">CHATFORGE // SECURE AUTH</span>
+        <div className="login-heading">
+          <div className="login-brand">
+            <Terminal size={19} />
+            <h1>Welcome to Chatforge</h1>
           </div>
-          <div className="flex items-center gap-1 text-[11px] text-accent border border-border px-2 py-0.5 rounded">
-            <ShieldCheck size={13} />
-            <span>AES-256</span>
+          <div className="login-security">
+            <ShieldCheck size={14} />
+            <span>Protected account</span>
           </div>
         </div>
 
+        <p className="login-subtitle">Sign in to {import.meta.env?.VITE_MATRIX_HOMESERVER_URL || 'https://matrix.org'}. New direct rooms use end-to-end encryption.</p>
+
         {/* Mode Switcher Tabs */}
-        <div className="flex border border-border rounded mb-4 overflow-hidden">
+        <div className="login-tabs">
           <button
             type="button"
-            className={`flex-1 py-2 text-xs font-bold transition-colors ${
-              authMode === 'login' ? 'bg-accent text-black' : 'bg-transparent text-muted hover:text-text-main'
-            }`}
+            className={authMode === 'login' ? 'selected' : ''}
             onClick={() => {
               setAuthMode('login');
               setErrorMsg('');
             }}
           >
-            LOGIN
+            Sign in
           </button>
           <button
             type="button"
-            className={`flex-1 py-2 text-xs font-bold transition-colors ${
-              authMode === 'register' ? 'bg-accent text-black' : 'bg-transparent text-muted hover:text-text-main'
-            }`}
+            className={authMode === 'register' ? 'selected' : ''}
             onClick={() => {
               setAuthMode('register');
               setErrorMsg('');
             }}
           >
-            REGISTER
+            Create account
           </button>
         </div>
 
         {/* Feedback Alerts */}
         {errorMsg && (
-          <div className="p-2 mb-3 bg-danger/15 border border-danger text-danger text-xs rounded">
+          <div className="login-alert error" role="alert">
             {errorMsg}
           </div>
         )}
         {successMsg && (
-          <div className="p-2 mb-3 bg-accent/15 border border-accent text-accent text-xs rounded">
+          <div className="login-alert success" role="status" aria-live="polite">
             {successMsg}
           </div>
         )}
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div>
-            <label className="block text-xs text-muted mb-1 uppercase font-semibold">Operator Codename</label>
+        <form onSubmit={handleSubmit} className="login-form">
+          <div className="login-field">
+            <label htmlFor="auth-username">Username</label>
             <input
+              id="auth-username"
               type="text"
+              maxLength={32}
               autoFocus
-              className="cyber-input w-full"
-              placeholder="e.g. Neo, Trinity, ZeroCool"
+              className="login-input"
+              placeholder="Choose a username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               disabled={loading}
@@ -154,13 +153,14 @@ export const AuthScreen = () => {
             />
           </div>
 
-          <div>
-            <label className="block text-xs text-muted mb-1 uppercase font-semibold">Secret Passkey</label>
-            <div className="relative">
+          <div className="login-field">
+            <label htmlFor="auth-password">Password</label>
+            <div className="login-password-wrap">
               <input
+                id="auth-password"
                 type={showPassword ? 'text' : 'password'}
-                className="cyber-input w-full pr-8"
-                placeholder="Enter password (min 4 chars)"
+                className="login-input"
+                placeholder={authMode === 'register' ? 'At least 10 characters' : 'Enter your password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={loading}
@@ -168,8 +168,9 @@ export const AuthScreen = () => {
               />
               <button
                 type="button"
-                className="absolute right-2 top-2.5 text-muted hover:text-accent"
+                className="password-toggle"
                 onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
               >
                 {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
@@ -178,12 +179,13 @@ export const AuthScreen = () => {
 
           {authMode === 'register' && (
             <>
-              <div>
-                <label className="block text-xs text-muted mb-1 uppercase font-semibold">Confirm Passkey</label>
+              <div className="login-field">
+                <label htmlFor="auth-confirm-password">Confirm password</label>
                 <input
+                  id="auth-confirm-password"
                   type={showPassword ? 'text' : 'password'}
-                  className="cyber-input w-full"
-                  placeholder="Re-enter password to verify"
+                  className="login-input"
+                  placeholder="Enter your password again"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   disabled={loading}
@@ -191,18 +193,23 @@ export const AuthScreen = () => {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs text-muted mb-1.5 uppercase font-semibold">Select Avatar</label>
-                <div className="flex gap-2 justify-between">
+              <div className="login-field">
+                <label>Select an avatar</label>
+                <div className="avatar-options">
                   {AVATAR_OPTIONS.map((imgUrl) => (
                     <img
                       key={imgUrl}
                       src={imgUrl}
-                      alt="avatar"
-                      className={`w-10 h-10 rounded-full cursor-pointer object-cover border-2 transition-all ${
-                        avatar === imgUrl ? 'border-accent scale-110 shadow-md' : 'border-border opacity-60 hover:opacity-100'
-                      }`}
+                      alt={`Avatar option ${AVATAR_OPTIONS.indexOf(imgUrl) + 1}`}
+                      aria-label={`Use avatar ${AVATAR_OPTIONS.indexOf(imgUrl) + 1}`}
+                      aria-pressed={avatar === imgUrl}
+                      className={`avatar-option ${avatar === imgUrl ? 'selected' : ''}`}
                       onClick={() => setAvatar(imgUrl)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') setAvatar(imgUrl);
+                      }}
                     />
                   ))}
                 </div>
@@ -213,19 +220,20 @@ export const AuthScreen = () => {
           <button
             type="submit"
             disabled={loading}
-            className="cyber-btn w-full justify-center py-2.5 mt-4 font-bold text-xs flex items-center gap-2"
+            className="login-submit"
           >
             {loading ? (
               <span>AUTHENTICATING PROTOCOL...</span>
             ) : (
               <>
-                <span>{authMode === 'register' ? 'CREATE SECURE IDENTITY' : 'CONNECT TO NETWORK'}</span>
-                <ArrowRight size={14} />
+                <span>{authMode === 'register' ? 'Create account' : 'Sign in'}</span>
+                <ArrowRight size={16} />
               </>
             )}
           </button>
         </form>
+        <p className="login-footer">Your conversations are waiting.</p>
       </div>
-    </div>
+    </main>
   );
 };

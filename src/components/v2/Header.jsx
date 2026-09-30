@@ -37,7 +37,7 @@ export const Header = () => {
       <div className="topbar-left">
         <div className="brand-logo">
           <Terminal size={18} className="text-accent" />
-          <span className="brand-title">CHATFORGE</span>
+          <h1 className="brand-title">CHATFORGE</h1>
           <span className="brand-badge">V2</span>
         </div>
 
@@ -52,7 +52,7 @@ export const Header = () => {
       <div className="topbar-center hidden md:flex">
         <div className="security-tag">
           <Shield size={12} />
-          <span>E2EE // AES-256-GCM</span>
+          <span>Encrypted Matrix connection</span>
         </div>
         <span className="text-muted text-xs">PORT {serverInfo.port || 3001}</span>
       </div>

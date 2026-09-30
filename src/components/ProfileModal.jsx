@@ -15,6 +15,9 @@ const ProfileModal = ({ currentProfile, onSaveProfile, onClose, serverInfo }) =>
   const username = currentProfile?.username || currentProfile?.name || 'Operator_Zero';
   const [avatar, setAvatar] = useState(currentProfile?.avatar || PRESET_AVATARS[0]);
   const [customStatus, setCustomStatus] = useState(currentProfile?.customStatus || 'Active Node on Mesh Network');
+  const appAddress = window.location.protocol === 'https:'
+    ? window.location.origin
+    : `http://${serverInfo?.localIP || window.location.hostname}:${serverInfo?.port || 3001}`;
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -31,11 +34,11 @@ const ProfileModal = ({ currentProfile, onSaveProfile, onClose, serverInfo }) =>
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="cyber-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="cyber-modal" role="dialog" aria-modal="true" aria-labelledby="profile-dialog-title" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="modal-title">
             <User size={16} className="text-accent" />
-            <span>OPERATOR IDENTITY & MULTI-DEVICE PAIRING</span>
+            <span id="profile-dialog-title">Profile and device access</span>
           </div>
           <button className="btn-close" onClick={onClose}><X size={16} /></button>
         </div>
@@ -51,29 +54,40 @@ const ProfileModal = ({ currentProfile, onSaveProfile, onClose, serverInfo }) =>
               Open this application on any second device (phone, laptop, tablet) on your local Wi-Fi / network to chat in real-time:
             </p>
             <div className="lan-url-badge">
-              <span>http://{serverInfo?.localIP || window.location.hostname}:5173</span>
+              <span>{appAddress}</span>
             </div>
           </div>
 
           <form onSubmit={handleSubmit}>
             <div className="form-group">
-              <label>CHOOSE AVATAR GLYPH:</label>
+              <label>Choose an avatar</label>
               <div className="avatar-picker-row">
                 {PRESET_AVATARS.map((url, idx) => (
                   <img
                     key={idx}
                     src={url}
-                    alt="avatar"
+                    alt={`Avatar option ${idx + 1}`}
                     className={`pick-avatar ${avatar === url ? 'selected' : ''}`}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Choose avatar ${idx + 1}`}
+                    aria-pressed={avatar === url}
                     onClick={() => { soundFX.playKeypress(); setAvatar(url); }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setAvatar(url);
+                      }
+                    }}
                   />
                 ))}
               </div>
             </div>
 
             <div className="form-group">
-              <label>OPERATOR HANDLE / USERNAME:</label>
+              <label htmlFor="profile-username">Username</label>
               <input
+                id="profile-username"
                 type="text"
                 value={username}
                 readOnly
@@ -83,9 +97,11 @@ const ProfileModal = ({ currentProfile, onSaveProfile, onClose, serverInfo }) =>
             </div>
 
             <div className="form-group">
-              <label>CUSTOM STATUS MOTD:</label>
+              <label htmlFor="profile-status">Custom status</label>
               <input
+                id="profile-status"
                 type="text"
+                maxLength={140}
                 value={customStatus}
                 onChange={(e) => setCustomStatus(e.target.value)}
                 placeholder="Status / Bio broadcasted to peers"

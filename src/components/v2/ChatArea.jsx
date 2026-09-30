@@ -207,11 +207,11 @@ export const ChatArea = () => {
   }, [messages, pinnedMessageIds]);
 
   if (!activeContact) {
-    return <EmptyState onStartChat={() => {}} />;
+    return <EmptyState />;
   }
 
   return (
-    <main className="chatarea">
+    <section className="chatarea" aria-label={`Conversation with ${activeContact.name || activeContact.tag}`}>
       {/* Active Conversation Top Bar */}
       <div className="chatarea-header">
         <div className="flex items-center gap-3">
@@ -273,15 +273,15 @@ export const ChatArea = () => {
             <Search size={15} />
           </button>
 
-          {/* E2EE Safety Number Cipher Inspector */}
+          {/* Privacy and connection details */}
           <button
             type="button"
             className="cyber-btn text-[11px] flex items-center gap-1 px-2.5 py-1"
             onClick={() => openModal('encryption', activeContact)}
-            title="Inspect E2EE Zero-Knowledge Cipher & Safety Numbers"
+            title="View connection and privacy details"
           >
             <Lock size={12} className="text-accent" />
-            <span className="hidden sm:inline">CIPHER MATRIX</span>
+            <span className="hidden sm:inline">PRIVACY DETAILS</span>
           </button>
 
           {/* Session Media Vault */}
@@ -300,6 +300,9 @@ export const ChatArea = () => {
               type="button"
               className="cyber-btn btn-icon"
               onClick={() => setShowMenu(!showMenu)}
+              title="Conversation options"
+              aria-label="Conversation options"
+              aria-expanded={showMenu}
             >
               <MoreVertical size={15} />
             </button>
@@ -324,7 +327,7 @@ export const ChatArea = () => {
                     setShowMenu(false);
                   }}
                 >
-                  <Lock size={13} className="text-accent" /> Verify Safety Numbers
+                  <Lock size={13} className="text-accent" /> Connection and privacy
                 </button>
                 <button
                   type="button"
@@ -458,8 +461,8 @@ export const ChatArea = () => {
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-muted text-xs">
             <ShieldCheck size={36} className="text-accent opacity-40 mb-2" />
-            <p className="font-bold text-text-main">SECURE CHANNEL ESTABLISHED</p>
-            <p className="text-[11px] text-muted mt-1">Direct end-to-end encrypted link with {activeContact.name || activeContact.tag}.</p>
+            <p className="font-bold text-text-main">No messages yet</p>
+            <p className="text-[11px] text-muted mt-1">End-to-end encrypted Matrix conversation with {activeContact.name || activeContact.tag}.</p>
           </div>
         ) : (
           messages.map((msg) => {
@@ -662,7 +665,7 @@ export const ChatArea = () => {
                               <CheckCheck size={13} />
                             </span>
                           ) : (
-                            <span title="Dispatched to relay" className="flex items-center text-muted">
+                            <span title="Sent through the encrypted Matrix room" className="flex items-center text-muted">
                               <Check size={13} />
                             </span>
                           )}
@@ -700,6 +703,6 @@ export const ChatArea = () => {
 
       {/* Message Input Component */}
       <MessageInput />
-    </main>
+    </section>
   );
 };

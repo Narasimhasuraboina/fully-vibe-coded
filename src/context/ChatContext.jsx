@@ -4,7 +4,7 @@ import { THEMES } from '../themes';
 import { socketService } from '../services/socketService';
 import { soundFX } from '../services/audioService';
 import { notificationService } from '../services/notificationService';
-import { loadState, saveState, loadAccountState, saveAccountState } from '../services/storage';
+import { accountId, loadDurableData, loadState, saveDurableData, saveState, loadAccountState, saveAccountState } from '../services/storage';
 
 const DEFAULT_GB_SETTINGS = {
   soundEffects: true,
@@ -14,7 +14,15 @@ const DEFAULT_GB_SETTINGS = {
 
 export const ChatProvider = ({ children }) => {
   // 1. Current Authenticated Profile
-  const [currentUser, setCurrentUser] = useState(() => loadState('my_profile', null));
+  const [currentUser, setCurrentUser] = useState(() => {
+    const saved = loadState('my_profile', null);
+    if (!saved || typeof saved !== 'object' || !saved.sessionToken || !saved.matrixUserId) {
+      if (saved?.password) saveState('my_profile', null);
+      return null;
+    }
+    const { password: _password, ...safeProfile } = saved;
+    return safeProfile;
+  });
 
   // 2. Settings & Theme
   const [settings, setSettings] = useState(() => 
@@ -28,14 +36,14 @@ export const ChatProvider = ({ children }) => {
 
   // 4. Contacts & Active Conversation
   const [contacts, setContacts] = useState(() => 
-    currentUser ? loadAccountState(currentUser, 'contacts', []) : []
+    currentUser ? loadAccountState(currentUser, 'contacts', []).filter((contact) => /^@[A-Za-z0-9._=/-]+:[A-Za-z0-9.-]+(?::\d+)?$/.test(contact?.tag || '')) : []
   );
   const [activeContactId, setActiveContactId] = useState(null);
 
   // 5. Messages Store: { [contactId]: [Message] }
-  const [messages, setMessages] = useState(() => 
-    currentUser ? loadAccountState(currentUser, 'messages', {}) : {}
-  );
+  const [messages, setMessages] = useState({});
+  const messagesAccountRef = useRef(null);
+  const currentUserAccountId = accountId(currentUser);
 
   // 6. Scheduled Messages Store
   const [scheduledMessages, setScheduledMessages] = useState(() => 
@@ -67,6 +75,20 @@ export const ChatProvider = ({ children }) => {
   const activeContactRef = useRef(activeContactId);
   const contactsRef = useRef(contacts);
   const currentUserRef = useRef(currentUser);
+
+  useEffect(() => {
+    let cancelled = false;
+    messagesAccountRef.current = null;
+    if (!currentUserAccountId) {
+      return undefined;
+    }
+    loadDurableData(`account_${currentUserAccountId}_messages`, {}).then((savedMessages) => {
+      if (cancelled) return;
+      setMessages(savedMessages && typeof savedMessages === 'object' ? savedMessages : {});
+      messagesAccountRef.current = currentUserAccountId;
+    });
+    return () => { cancelled = true; };
+  }, [currentUserAccountId]);
 
   useEffect(() => {
     activeContactRef.current = activeContactId;
@@ -115,10 +137,10 @@ export const ChatProvider = ({ children }) => {
   }, [contacts, currentUser]);
 
   useEffect(() => {
-    if (currentUser) {
-      saveAccountState(currentUser, 'messages', messages);
+    if (currentUserAccountId && messagesAccountRef.current === currentUserAccountId) {
+      saveDurableData(`account_${currentUserAccountId}_messages`, messages);
     }
-  }, [messages, currentUser]);
+  }, [messages, currentUserAccountId]);
 
   useEffect(() => {
     if (currentUser) {
@@ -246,11 +268,27 @@ export const ChatProvider = ({ children }) => {
       onRegistered: (data) => {
         setIsConnected(true);
         if (data.localIP) {
-          setServerInfo((prev) => ({ ...prev, localIP: data.localIP }));
+          setServerInfo((prev) => ({ ...prev, localIP: data.localIP, port: data.port || prev.port }));
         }
       },
+      onProfileUpdated: (profile) => {
+        if (profile?.matrixUserId === currentUserRef.current?.matrixUserId) setCurrentUser(profile);
+      },
+      onSessionExpired: () => {
+        setIsConnected(false);
+        notificationService.pushToast({
+          title: 'SIGN IN REQUIRED',
+          message: 'Your secure session expired. Please sign in again.',
+          type: 'warning',
+        });
+        setCurrentUser(null);
+        setMessages({});
+        messagesAccountRef.current = null;
+        saveState('my_profile', null);
+      },
       onPeerOnline: (data) => {
-        const { peer } = data;
+        const peer = data?.peer || data;
+        if (!peer?.tag) return;
         setContacts((prev) =>
           prev.map((c) =>
             c.tag?.toLowerCase() === peer.tag?.toLowerCase()
@@ -260,7 +298,8 @@ export const ChatProvider = ({ children }) => {
         );
       },
       onPeerOffline: (data) => {
-        const { peerTag, lastSeen } = data;
+        const peerTag = data?.peerTag || data?.tag;
+        const { lastSeen } = data || {};
         setContacts((prev) =>
           prev.map((c) =>
             c.tag?.toLowerCase() === peerTag?.toLowerCase()
@@ -269,8 +308,18 @@ export const ChatProvider = ({ children }) => {
           )
         );
       },
+      onPeerProfileUpdated: (peer) => {
+        if (!peer?.tag) return;
+        setContacts((prev) => prev.map((contact) =>
+          contact.tag?.toLowerCase() === peer.tag.toLowerCase()
+            ? { ...contact, avatar: peer.avatar || contact.avatar, customStatus: peer.customStatus || '' }
+            : contact
+        ));
+      },
       onMessageReceived: (data) => {
-        const { message, senderTag } = data;
+        const message = data?.message;
+        const senderTag = data?.senderTag || data?.senderInfo?.tag;
+        if (!message?.id || !senderTag) return;
         soundFX.playReceived();
 
         // Ensure contact exists
@@ -312,6 +361,8 @@ export const ChatProvider = ({ children }) => {
         const isCurrentlyActive = activeContactRef.current === contactId;
         const incomingMsg = {
           ...message,
+          sender: 'contact',
+          senderTag,
           status: isCurrentlyActive ? 'read' : (message.status || 'delivered'),
         };
 
@@ -345,6 +396,30 @@ export const ChatProvider = ({ children }) => {
         if (isCurrentlyActive) {
           socketService.emitReadReceipt(incomingMsg.id, senderTag);
         }
+      },
+      onOwnMessageReceived: ({ message, recipientTag }) => {
+        if (!message?.id || !recipientTag) return;
+        const existingContact = contactsRef.current.find((contact) => contact.tag?.toLowerCase() === recipientTag.toLowerCase());
+        const contactId = existingContact?.id || `peer_${recipientTag.toLowerCase()}`;
+        if (!existingContact) {
+          const username = recipientTag.split(':')[0].replace(/^@/, '');
+          setContacts((prev) => prev.some((contact) => contact.tag?.toLowerCase() === recipientTag.toLowerCase()) ? prev : [{
+            id: contactId,
+            name: username,
+            tag: recipientTag,
+            avatar: '',
+            status: 'offline',
+            lastSeen: 'offline',
+            unreadCount: 0,
+            disappearingTimer: 0,
+            pinned: false,
+          }, ...prev]);
+        }
+        setMessages((prev) => {
+          const list = prev[contactId] || [];
+          if (list.some((item) => item.id === message.id)) return prev;
+          return { ...prev, [contactId]: [...list, { ...message, sender: 'user', senderTag: currentUserRef.current?.tag, status: 'sent' }] };
+        });
       },
       onMessageStatusUpdate: (data) => {
         const { messageId, status } = data;
@@ -462,27 +537,33 @@ export const ChatProvider = ({ children }) => {
 
   // Auth: Login / Register
   const login = (profile) => {
-    setCurrentUser(profile);
+    const { password: _password, ...safeProfile } = profile;
+    setCurrentUser(safeProfile);
     const loadedContacts = loadAccountState(profile, 'contacts', []);
-    const loadedMessages = loadAccountState(profile, 'messages', {});
     const loadedSettings = loadAccountState(profile, 'gb_settings', DEFAULT_GB_SETTINGS);
     const loadedScheduled = loadAccountState(profile, 'scheduled', []);
     const loadedPinned = loadAccountState(profile, 'pinned_messages', {});
 
     setContacts(loadedContacts);
-    setMessages(loadedMessages);
+    messagesAccountRef.current = null;
+    setMessages({});
     setScheduledMessages(loadedScheduled);
     setPinnedMessageIds(loadedPinned);
     setSettings(loadedSettings);
     setThemeState(loadedSettings.theme || 'matrix');
     setActiveContactId(loadedContacts[0]?.id || null);
+    setActiveModal(null);
+    setModalData(null);
+    setSearchQuery('');
+    setIsChatSearchOpen(false);
+    setChatSearchQuery('');
     setupSocketListeners();
-    socketService.connect(profile);
+    socketService.connect(safeProfile);
   };
 
   // Auth: Logout
   const logout = () => {
-    socketService.disconnect();
+    socketService.logoutSession();
     setCurrentUser(null);
     setActiveContactId(null);
     setContacts([]);
@@ -511,7 +592,7 @@ export const ChatProvider = ({ children }) => {
       type: payload.type || 'text',
       file: payload.file || null,
       audioUrl: payload.audioUrl || null,
-      mediaUrl: payload.mediaUrl || payload.file?.data || payload.file?.url || null,
+      mediaUrl: payload.mediaUrl || payload.file?.url || null,
       code: payload.code || null,
       language: payload.language || null,
       fileName: payload.fileName || payload.file?.name || null,
@@ -743,12 +824,13 @@ export const ChatProvider = ({ children }) => {
 
   // Update Profile
   const updateProfile = useCallback((updatedProfile) => {
-    setCurrentUser(updatedProfile);
-    saveState('my_profile', updatedProfile);
+    const { password: _password, ...safeProfile } = updatedProfile;
+    setCurrentUser(safeProfile);
+    saveState('my_profile', safeProfile);
     if (isConnected) {
       socketService.emit('update_profile', {
-        avatar: updatedProfile.avatar,
-        customStatus: updatedProfile.customStatus,
+        avatar: safeProfile.avatar,
+        customStatus: safeProfile.customStatus,
       });
     }
     notificationService.pushToast({

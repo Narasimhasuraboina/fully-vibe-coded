@@ -82,16 +82,16 @@ const ChatArea = ({
           </div>
           <h2>CHATFORGE PROTOCOL // STANDBY</h2>
           <p className="desc">
-            Select a target node from the left frequency matrix to initiate an encrypted end-to-end P2P messaging session.
+            Select a Matrix contact to start an end-to-end encrypted direct conversation.
           </p>
           <div className="quick-intel-cards">
             <div className="intel-card">
               <ShieldCheck size={16} className="text-accent" />
-              <span>Quantum-Resistant AES-256 GCM</span>
+              <span>End-to-end encrypted rooms</span>
             </div>
             <div className="intel-card">
               <Radio size={16} className="text-accent" />
-              <span>Real-Time Instant Socket Relay</span>
+              <span>Matrix sync and delivery</span>
             </div>
             <div className="intel-card">
               <Zap size={16} className="text-accent" />
@@ -306,7 +306,7 @@ const ChatArea = ({
       <div className="messages-feed">
         <div className="encryption-notice-bubble">
           <ShieldCheck size={14} className="text-accent" />
-          <span>AES-256 GCM Quantum-Resistant Session Active. Messages, voice memos, images, videos & calls are encrypted end-to-end.</span>
+          <span>Matrix encrypts this conversation on your device before sending. The homeserver can see room metadata, but cannot read encrypted messages.</span>
         </div>
 
         {displayedMessages.map((msg) => (

@@ -121,7 +121,7 @@ const MessageItem = ({
     if (!isUser) return null;
     if (message.isQueuedInServerMailbox || message.status === 'queued_server') {
       return (
-        <span className="server-mailbox-tag" title="Encrypted message is deposited in Relay Server Offline Mailbox. It will deliver automatically when peer logs in even if your browser is closed.">
+        <span className="server-mailbox-tag" title="Message is stored on the relay and delivered when the peer logs in. The relay can read message contents.">
           <Cloud size={13} className="text-accent pulse-icon" />
         </span>
       );
@@ -158,7 +158,7 @@ const MessageItem = ({
         {(message.isQueuedInServerMailbox || message.status === 'queued_server') && isUser && (
           <div className="outbox-queue-banner server-mailbox-banner">
             <Cloud size={12} className="pulse-icon text-accent" />
-            <span>ENCRYPTED SERVER MAILBOX: WILL DELIVER ON PEER LOGIN</span>
+            <span>STORED ON RELAY: DELIVERS WHEN PEER LOGS IN</span>
           </div>
         )}
 

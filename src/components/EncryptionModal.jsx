@@ -1,130 +1,59 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  ShieldCheck, 
-  Copy, 
-  Check, 
-  X, 
-  Lock 
-} from 'lucide-react';
-import { cryptoService } from '../services/cryptoService';
-import { soundFX } from '../services/audioService';
+import React, { useEffect, useRef } from 'react';
+import { ShieldCheck, X } from 'lucide-react';
 
-const EncryptionModal = ({ myProfile, contact, onClose }) => {
-  const [safetyNumbers, setSafetyNumbers] = useState([]);
-  const [copied, setCopied] = useState(false);
-  const [verified, setVerified] = useState(false);
-
+const EncryptionModal = ({ contact, onClose }) => {
+  const closeButtonRef = useRef(null);
   useEffect(() => {
-    soundFX.playKeypress();
-    async function loadNumbers() {
-      if (myProfile?.tag && contact?.tag) {
-        const nums = await cryptoService.generateSafetyNumbers(myProfile.tag, contact.tag);
-        setSafetyNumbers(nums);
+    closeButtonRef.current?.focus();
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') onClose();
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        closeButtonRef.current?.focus();
       }
-    }
-    loadNumbers();
-  }, [myProfile, contact]);
-
-  const handleCopy = () => {
-    soundFX.playKeypress();
-    const str = safetyNumbers.join(' ');
-    navigator.clipboard.writeText(str);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleToggleVerified = () => {
-    soundFX.playSent();
-    setVerified(!verified);
-  };
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
 
   return (
-    <div className="modal-backdrop cyber-modal-backdrop" onClick={onClose}>
-      <div className="cyber-modal encryption-verify-modal" onClick={(e) => e.stopPropagation()}>
-        
-        {/* Modal Header */}
+    <div className="modal-backdrop cyber-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="cyber-modal encryption-verify-modal" role="dialog" aria-modal="true" aria-labelledby="privacy-dialog-title">
         <div className="modal-header cyber-modal-header">
-          <div className="modal-title">
+          <div className="modal-title" id="privacy-dialog-title">
             <ShieldCheck size={18} className="text-accent" />
-            <span>END-TO-END ZERO-KNOWLEDGE CIPHER</span>
+            <span>Encryption and privacy</span>
           </div>
-          <button className="btn-close cyber-modal-close" onClick={onClose}>
+          <button ref={closeButtonRef} type="button" className="btn-close cyber-modal-close" onClick={onClose} aria-label="Close privacy details">
             <X size={18} />
           </button>
         </div>
 
         <div className="encryption-body">
-          {/* Security Banner */}
           <div className="security-status-banner">
-            <div className="status-icon-ring">
-              <Lock size={24} className="text-accent pulse-icon" />
-            </div>
+            <div className="status-icon-ring"><ShieldCheck size={24} className="text-accent" /></div>
             <div className="status-meta">
-              <h4>SESSION CIPHER: AES-GCM-256 (QUANTUM-SAFE)</h4>
+              <h4>New direct rooms use end-to-end encryption</h4>
               <p>
-                Messages, calls, images, and file payloads between you and <strong>{contact?.name} ({contact?.tag})</strong> are encrypted end-to-end. Relay servers hold 0 knowledge of your keys or payloads.
+                Chatforge encrypts room messages on your device with the Matrix Rust crypto SDK. File attachments are encrypted before upload. The homeserver stores ciphertext and an encrypted key backup.
               </p>
             </div>
           </div>
-
-          {/* Safety Number Matrix */}
-          <div className="safety-number-box">
-            <div className="box-top-row">
-              <span className="box-title">VERIFY SAFETY NUMBERS</span>
-              <button className="copy-btn" onClick={handleCopy}>
-                {copied ? <Check size={13} className="text-accent" /> : <Copy size={13} />}
-                <span>{copied ? 'COPIED CIPHER' : 'COPY NUMBERS'}</span>
-              </button>
-            </div>
-
-            <p className="box-desc">
-              Compare these 60 digits with {contact?.name}'s device to guarantee no man-in-the-middle node exists on the relay mesh:
-            </p>
-
-            <div className="safety-grid">
-              {safetyNumbers.map((num, i) => (
-                <div key={i} className="safety-block">
-                  <span className="block-index">{(i + 1).toString().padStart(2, '0')}</span>
-                  <span className="block-val">{num}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Key Fingerprints */}
           <div className="fingerprint-section">
             <div className="fp-row">
-              <span className="fp-label">YOUR PUBLIC KEY HASH:</span>
-              <span className="fp-val">{myProfile?.pgp || 'PGP-4096-AES-GCM-LOCAL-IDENTITY'}</span>
+              <span className="fp-label">Matrix account</span>
+              <span className="fp-val">{contact?.name || contact?.tag || 'No conversation selected'}</span>
             </div>
-            <div className="fp-row">
-              <span className="fp-label">PEER PUBLIC KEY HASH:</span>
-              <span className="fp-val">{contact?.pgp || 'PGP-4096-REMOTE-PEER-NODE'}</span>
-            </div>
-          </div>
-
-          {/* Verification Checkbox & Confirmation */}
-          <div className="verify-toggle-box">
-            <label className="cyber-checkbox-label">
-              <input
-                type="checkbox"
-                checked={verified}
-                onChange={handleToggleVerified}
-              />
-              <span className="checkmark"></span>
-              <span className="label-txt">Mark {contact?.name} as cryptographic verified peer node</span>
-            </label>
+            <p className="box-desc">
+              <strong>Verify the other person’s Matrix device before relying on their identity.</strong> The homeserver still sees account IDs, room membership, message timing, IP addresses, and encrypted attachment sizes. Your Matrix account password protects key backup; if you change that password, verify the backup remains accessible in Matrix settings.
+            </p>
           </div>
         </div>
 
-        {/* Footer */}
         <div className="cyber-modal-footer">
-          <button className="cyber-btn btn-primary" onClick={onClose}>
-            CLOSE INSPECTOR
-          </button>
+          <button type="button" className="cyber-btn btn-primary" onClick={onClose}>Close</button>
         </div>
-
-      </div>
+      </section>
     </div>
   );
 };

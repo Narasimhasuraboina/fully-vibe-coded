@@ -93,7 +93,7 @@ const TopBar = ({
         </div>
 
         {/* Realtime P2P Socket Status Tag */}
-        <div className={`realtime-status-pill ${isRealtimeConnected ? 'connected' : 'offline'}`} title={isRealtimeConnected ? 'Real-time WebSocket Relay Active' : 'Connecting to Relay Server...'}>
+        <div className={`realtime-status-pill ${isRealtimeConnected ? 'connected' : 'offline'}`} title={isRealtimeConnected ? 'Matrix homeserver connected' : 'Connecting to Matrix homeserver...'}>
           <Radio size={12} className={isRealtimeConnected ? 'animate-pulse text-accent' : 'text-muted'} />
           <span className="hide-mobile">{isRealtimeConnected ? 'MESH ONLINE' : 'LOCAL STANDBY'}</span>
           <span className="show-mobile-inline">{isRealtimeConnected ? 'ONLINE' : 'OFFLINE'}</span>
@@ -101,7 +101,7 @@ const TopBar = ({
 
         <div className="security-tag hide-mobile">
           <Shield size={13} className="text-accent" />
-          <span>AES-256 GCM P2P</span>
+          <span>Matrix E2EE</span>
         </div>
       </div>
 

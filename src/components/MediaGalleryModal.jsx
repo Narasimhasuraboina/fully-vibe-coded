@@ -117,7 +117,7 @@ const MediaGalleryModal = ({ contact, messages = [], onClose, onOpenMedia }) => 
           {filteredItems.length === 0 ? (
             <div className="vault-empty">
               <Shield size={36} className="text-muted opacity-40" />
-              <p>No encrypted media or payloads found in this session partition.</p>
+              <p>No shared media in this conversation yet.</p>
             </div>
           ) : (
             <div className="vault-grid">

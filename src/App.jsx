@@ -15,6 +15,7 @@ import MediaViewerModal from './components/MediaViewerModal';
 import ForwardModal from './components/ForwardModal';
 import ProfileModal from './components/ProfileModal';
 import { THEMES } from './themes';
+import './legacy.css';
 import './App.css';
 
 function MainAppShell() {
@@ -40,7 +41,7 @@ function MainAppShell() {
   if (!currentUser) {
     return (
       <div className="chatforge-app-root">
-        <MatrixBackground enabled={true} color={THEMES[theme]?.accent || '#00ff66'} />
+        <MatrixBackground enabled={false} color={THEMES[theme]?.accent || '#00ff66'} />
         <ToastNotification />
         <AuthScreen />
       </div>
@@ -55,10 +56,10 @@ function MainAppShell() {
       <ToastNotification />
       <Header />
       
-      <div className={`chatforge-main-layout ${layoutClass}`}>
+      <main className={`chatforge-main-layout ${layoutClass}`}>
         <Sidebar />
         <ChatArea />
-      </div>
+      </main>
 
       {/* Dynamic Modals */}
       {activeModal === 'broadcast' && (
@@ -124,10 +125,37 @@ function MainAppShell() {
   );
 }
 
+class AppErrorBoundary extends React.Component {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error) {
+    console.error('[APP] Unhandled interface error:', error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <main className="app-error-screen" role="alert">
+          <h1>Chatforge ran into a problem</h1>
+          <p>Reload the page to reconnect to your conversations.</p>
+          <button type="button" onClick={() => window.location.reload()}>Reload Chatforge</button>
+        </main>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   return (
-    <ChatProvider>
-      <MainAppShell />
-    </ChatProvider>
+    <AppErrorBoundary>
+      <ChatProvider>
+        <MainAppShell />
+      </ChatProvider>
+    </AppErrorBoundary>
   );
 }

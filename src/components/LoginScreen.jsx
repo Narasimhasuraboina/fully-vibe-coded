@@ -19,7 +19,7 @@ const LoginScreen = ({ onLogin, serverInfo }) => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [avatar, setAvatar] = useState(AVATAR_OPTIONS[0]);
-  const [customStatus, setCustomStatus] = useState('Operating on Encrypted P2P Mesh');
+  const [customStatus, setCustomStatus] = useState('Available');
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -101,7 +101,7 @@ const LoginScreen = ({ onLogin, serverInfo }) => {
           <span className="terminal-sys-title">CHATFORGE // SECURE AUTH GATEWAY</span>
           <div className="terminal-enc-badge">
             <ShieldCheck size={12} className="text-accent" />
-            <span>SHA-256 ENCRYPTED</span>
+            <span>PROTECTED ACCOUNT</span>
           </div>
         </div>
 
