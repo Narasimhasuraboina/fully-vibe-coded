@@ -23,7 +23,9 @@ import {
   Search,
   ChevronUp,
   ChevronDown,
-  X
+  X,
+  Eye,
+  UserMinus
 } from 'lucide-react';
 import { useChat } from '../../context/useChat';
 import { MessageInput } from './MessageInput';
@@ -32,6 +34,23 @@ import { soundFX } from '../../services/audioService';
 import { DEFAULT_AVATAR } from '../../avatars';
 
 const REACTION_EMOJIS = ['🔥', '❤️', '⚡', '💀', '👍'];
+
+const TIMER_OPTIONS = [
+  { seconds: 0, label: 'Off (Persistent)' },
+  { seconds: 5, label: '5 seconds' },
+  { seconds: 10, label: '10 seconds' },
+  { seconds: 30, label: '30 seconds' },
+  { seconds: 60, label: '1 minute' },
+  { seconds: 3600, label: '1 hour' },
+  { seconds: 86400, label: '24 hours' },
+];
+
+function formatDisappearingTime(sec) {
+  if (!sec) return 'Off';
+  if (sec < 60) return `${sec}s`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+  return `${Math.floor(sec / 3600)}h`;
+}
 
 function AudioPlayerMessage({ audioUrl, duration }) {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -117,6 +136,9 @@ export const ChatArea = () => {
     typingStatus,
     reactMessage,
     deleteMessage,
+    shredMessage,
+    setContactDisappearingTimer,
+    removeContact,
     openModal,
     pinnedMessageIds,
     togglePinMessage,
@@ -127,9 +149,66 @@ export const ChatArea = () => {
   } = useChat();
 
   const [showMenu, setShowMenu] = useState(false);
+  const [showTimerDropdown, setShowTimerDropdown] = useState(false);
+  const [revealedTimers, setRevealedTimers] = useState({});
   const [copiedId, setCopiedId] = useState(null);
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const messagesEndRef = useRef(null);
+
+  // Auto-countdown effect for active ephemeral and revealed view-once messages
+  useEffect(() => {
+    const hasActiveCountdowns = Object.keys(revealedTimers).length > 0;
+    if (!hasActiveCountdowns) return;
+
+    const interval = setInterval(() => {
+      setRevealedTimers((prev) => {
+        let hasChanges = false;
+        const next = { ...prev };
+
+        Object.entries(next).forEach(([msgId, timer]) => {
+          if (timer.remaining <= 1) {
+            delete next[msgId];
+            hasChanges = true;
+            shredMessage(msgId, activeContact?.id);
+          } else {
+            next[msgId] = { ...timer, remaining: timer.remaining - 1 };
+            hasChanges = true;
+          }
+        });
+
+        return hasChanges ? next : prev;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [revealedTimers, activeContact, shredMessage]);
+
+  // Auto-init countdown for regular ephemeral messages when thread has timer or message has burnCountdown
+  useEffect(() => {
+    if (!messages || messages.length === 0) return;
+    messages.forEach((msg) => {
+      if (
+        msg.burnAfterRead &&
+        !msg.isViewOnce &&
+        !revealedTimers[msg.id] &&
+        (msg.burnCountdown || activeContact?.disappearingTimer)
+      ) {
+        const dur = Number(msg.burnCountdown || activeContact?.disappearingTimer || 10);
+        setRevealedTimers((prev) => ({
+          ...prev,
+          [msg.id]: { remaining: dur, total: dur },
+        }));
+      }
+    });
+  }, [messages, activeContact?.disappearingTimer, revealedTimers]);
+
+  const handleRevealViewOnce = (msgId, countdownSeconds = 10) => {
+    soundFX.playKeypress();
+    setRevealedTimers((prev) => ({
+      ...prev,
+      [msgId]: { remaining: countdownSeconds, total: countdownSeconds },
+    }));
+  };
 
   // Auto-scroll to bottom
   const scrollToBottom = () => {
@@ -274,6 +353,58 @@ export const ChatArea = () => {
             <Search size={15} />
           </button>
 
+          {/* Ephemeral Disappearing Messages Timer Dropdown */}
+          <div className="relative">
+            <button
+              type="button"
+              className={`cyber-btn text-[11px] flex items-center gap-1.5 px-2.5 py-1 transition-colors ${
+                (activeContact.disappearingTimer || 0) > 0
+                  ? 'bg-danger/15 border-danger/50 text-danger hover:bg-danger/25 shadow-[0_0_8px_rgba(239,68,68,0.25)]'
+                  : 'text-muted hover:text-text-main'
+              }`}
+              onClick={() => {
+                setShowTimerDropdown(!showTimerDropdown);
+                setShowMenu(false);
+              }}
+              title="Ephemeral Disappearing Messages Timer"
+              aria-label="Disappearing messages timer"
+              aria-expanded={showTimerDropdown}
+            >
+              <Flame size={13} className={(activeContact.disappearingTimer || 0) > 0 ? 'text-danger animate-pulse' : ''} />
+              <span className="font-mono">
+                {(activeContact.disappearingTimer || 0) > 0
+                  ? formatDisappearingTime(activeContact.disappearingTimer)
+                  : 'TIMER'}
+              </span>
+            </button>
+
+            {showTimerDropdown && (
+              <div className="absolute right-0 mt-1 w-44 bg-bg-card border border-border rounded shadow-xl z-30 py-1 text-xs animate-fadeIn">
+                <div className="px-3 py-1 text-[10px] font-bold text-muted uppercase tracking-wider border-b border-border/50">
+                  Auto-Delete Timer
+                </div>
+                {TIMER_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.seconds}
+                    type="button"
+                    className={`w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-bg-card-hover ${
+                      (activeContact.disappearingTimer || 0) === opt.seconds
+                        ? 'text-accent font-bold bg-accent/10'
+                        : 'text-text-main'
+                    }`}
+                    onClick={() => {
+                      setContactDisappearingTimer(activeContact.id, opt.seconds);
+                      setShowTimerDropdown(false);
+                    }}
+                  >
+                    <span>{opt.label}</span>
+                    {(activeContact.disappearingTimer || 0) === opt.seconds && <Check size={12} />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Privacy and connection details */}
           <button
             type="button"
@@ -300,7 +431,10 @@ export const ChatArea = () => {
             <button
               type="button"
               className="cyber-btn btn-icon"
-              onClick={() => setShowMenu(!showMenu)}
+              onClick={() => {
+                setShowMenu(!showMenu);
+                setShowTimerDropdown(false);
+              }}
               title="Conversation options"
               aria-label="Conversation options"
               aria-expanded={showMenu}
@@ -310,6 +444,16 @@ export const ChatArea = () => {
 
             {showMenu && (
               <div className="absolute right-0 mt-1 w-48 bg-bg-card border border-border rounded shadow-lg z-20 py-1 text-xs">
+                <button
+                  type="button"
+                  className="w-full px-3 py-2 text-left hover:bg-bg-card-hover flex items-center gap-2 text-text-main"
+                  onClick={() => {
+                    setShowTimerDropdown(true);
+                    setShowMenu(false);
+                  }}
+                >
+                  <Flame size={13} className="text-danger" /> Disappearing Timer
+                </button>
                 <button
                   type="button"
                   className="w-full px-3 py-2 text-left hover:bg-bg-card-hover flex items-center gap-2 text-text-main"
@@ -350,6 +494,16 @@ export const ChatArea = () => {
                   }}
                 >
                   <Trash2 size={13} /> Clear Chat Thread
+                </button>
+                <button
+                  type="button"
+                  className="w-full px-3 py-2 text-left hover:bg-bg-card-hover flex items-center gap-2 text-danger"
+                  onClick={() => {
+                    removeContact(activeContact.id);
+                    setShowMenu(false);
+                  }}
+                >
+                  <UserMinus size={13} /> Remove Contact from List
                 </button>
               </div>
             )}
@@ -457,6 +611,28 @@ export const ChatArea = () => {
         </div>
       )}
 
+      {/* Disappearing Messages Active Channel Banner */}
+      {(activeContact.disappearingTimer || 0) > 0 && (
+        <div className="disappearing-banner">
+          <div className="flex items-center gap-2 overflow-hidden">
+            <Flame size={13} className="text-danger animate-pulse flex-shrink-0" />
+            <span className="text-danger font-mono font-bold text-[10px] tracking-wider flex-shrink-0">
+              DISAPPEARING ACTIVE:
+            </span>
+            <span className="text-text-main text-[11px] truncate">
+              Messages auto-shred {formatDisappearingTime(activeContact.disappearingTimer)} after being read.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="cyber-btn text-[10px] py-0.5 px-2 text-danger hover:bg-danger/20 font-mono ml-2 flex-shrink-0"
+            onClick={() => setContactDisappearingTimer(activeContact.id, 0)}
+          >
+            DISABLE
+          </button>
+        </div>
+      )}
+
       {/* Messages Thread Feed */}
       <div className="messages-feed">
         {messages.length === 0 ? (
@@ -494,13 +670,70 @@ export const ChatArea = () => {
                         </div>
                       )}
 
-                      {/* Burn-After-Read Warning Header */}
-                      {msg.burnAfterRead && (
-                        <div className="flex items-center gap-1.5 text-[10px] text-danger mb-1 font-mono">
-                          <Flame size={12} className="animate-pulse" />
-                          <span>DISAPPEARING PAYLOAD</span>
+                      {/* View-Once Locked Payload vs Decrypted Content */}
+                      {msg.isViewOnce && !isUser && !revealedTimers[msg.id] ? (
+                        <div
+                          className="view-once-locked-card"
+                          onClick={() => handleRevealViewOnce(msg.id, msg.burnCountdown || 10)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              handleRevealViewOnce(msg.id, msg.burnCountdown || 10);
+                            }
+                          }}
+                        >
+                          <div className="flex items-center gap-1.5 text-danger font-mono font-bold text-xs">
+                            <Flame size={16} className="animate-pulse" />
+                            <span>CONFIDENTIAL VIEW-ONCE PAYLOAD</span>
+                          </div>
+                          <p className="text-[11px] text-muted text-center max-w-xs">
+                            Encrypted transmission will auto-shred {msg.burnCountdown || 10}s after decrypting.
+                          </p>
+                          <button
+                            type="button"
+                            className="cyber-btn text-xs px-3 py-1 text-danger border-danger/60 hover:bg-danger/20 flex items-center gap-1.5 mt-1"
+                          >
+                            <Eye size={13} />
+                            <span>TAP TO REVEAL & COUNT DOWN</span>
+                          </button>
                         </div>
-                      )}
+                      ) : (
+                        <>
+                          {/* Burn-After-Read Warning & Live Countdown Bar Header */}
+                          {msg.burnAfterRead && (
+                            <div className="mb-2">
+                              <div className="flex items-center justify-between text-[10px] text-danger mb-1 font-mono">
+                                <span className="flex items-center gap-1">
+                                  <Flame size={12} className="animate-pulse" />
+                                  <span>
+                                    {msg.isViewOnce
+                                      ? `VIEW-ONCE ${revealedTimers[msg.id] ? `(${revealedTimers[msg.id].remaining}s)` : '(10s)'}`
+                                      : `DISAPPEARING ${revealedTimers[msg.id] ? `(${revealedTimers[msg.id].remaining}s)` : `(${msg.burnCountdown || activeContact.disappearingTimer || 10}s)`}`}
+                                  </span>
+                                </span>
+                                <button
+                                  type="button"
+                                  className="hover:underline flex items-center gap-0.5 text-danger opacity-75 hover:opacity-100"
+                                  onClick={() => shredMessage(msg.id, activeContact.id)}
+                                  title="Shred transmission immediately"
+                                >
+                                  SHRED NOW
+                                </button>
+                              </div>
+                              {revealedTimers[msg.id] && (
+                                <div className="countdown-bar-container">
+                                  <div
+                                    className="countdown-bar-fill"
+                                    style={{
+                                      width: `${(revealedTimers[msg.id].remaining / (revealedTimers[msg.id].total || 10)) * 100}%`,
+                                    }}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          )}
 
                       {/* Image Attachment */}
                       {isImage && mediaSrc && (
@@ -573,6 +806,8 @@ export const ChatArea = () => {
                           {renderHighlightedText(msg.text, chatSearchQuery)}
                         </p>
                       )}
+                        </>
+                      )}
                     </>
                   )}
 
@@ -637,6 +872,18 @@ export const ChatArea = () => {
                           onClick={() => handleCopyText(msg.id, msg.text)}
                         >
                           {copiedId === msg.id ? <Check size={11} className="text-accent" /> : <Copy size={11} />}
+                        </button>
+                      )}
+
+                      {/* Shred / Purge action */}
+                      {!msg.deleted && (
+                        <button
+                          type="button"
+                          className={`text-[10px] ml-0.5 transition-colors ${msg.burnAfterRead ? 'text-danger hover:text-danger/80' : 'text-muted hover:text-danger'}`}
+                          title="Purge / Shred transmission for all nodes"
+                          onClick={() => shredMessage(msg.id, activeContact.id)}
+                        >
+                          <Flame size={11} className={msg.burnAfterRead ? 'fill-danger/30' : ''} />
                         </button>
                       )}
 

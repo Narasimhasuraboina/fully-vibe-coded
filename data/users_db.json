@@ -4,35 +4,119 @@
     "tag": "@alice",
     "passwordHash": "0e83b3445d89232e37b88471ea7fc3d2cc64e17e68e6461af0d5d4e02a5d368dd7517bd86214944347e69d7f072e2833a67c9b7a070ea13728060b2bfb898553",
     "salt": "09abbaf46cc9fd7e9c91149bd7093e02",
-    "avatar": "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80",
+    "avatar": "https://api.dicebear.com/9.x/bottts/svg?seed=Alice",
     "customStatus": "Connected to Relay",
-    "lastSeen": "03:41 PM"
+    "lastSeen": "03:41 PM",
+    "sessionToken": null,
+    "contacts": [],
+    "settings": null
   },
   "@bob": {
     "username": "bob",
     "tag": "@bob",
     "passwordHash": "4ea9a393510f3866935c39edadbc3cdfd697c0ab824e6cb7b702705657257a9eef1c790d2f7fc443d7bfcf5f84995cd79a0fb543255b435195f9d6f7cadcc548",
     "salt": "1e1304b2d27dc0499a7f38ebe748eeb9",
-    "avatar": "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80",
+    "avatar": "https://api.dicebear.com/9.x/adventurer/svg?seed=Bob",
     "customStatus": "Connected to Relay",
-    "lastSeen": "03:41 PM"
+    "lastSeen": "03:41 PM",
+    "sessionToken": null,
+    "contacts": [],
+    "settings": null
   },
   "@tester": {
     "username": "tester",
     "tag": "@tester",
     "passwordHash": "daf7f81507443b0f839f7f2deef44f7cb15d1bb50f8490b99ad7275eb6dc713f40c57a2e0aa25f9724c1635300dabb1b2a6f8a3c905510099b3d78f68dd0fc42",
     "salt": "a4383660d54d852c480bc7d73126702e",
-    "avatar": "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80",
+    "avatar": "https://api.dicebear.com/9.x/bottts/svg?seed=Circuit",
     "customStatus": "Connected to Relay",
-    "lastSeen": "03:51 PM"
+    "lastSeen": "03:51 PM",
+    "sessionToken": null,
+    "contacts": [],
+    "settings": null
   },
   "@test": {
     "username": "test",
     "tag": "@test",
     "passwordHash": "336b993e4ebd63450e18e41b3c84ac922abba39c326d25fac64b899d090858acf4e7a11afe7219c99b8446ebe9649d0fe7e6a8e385be92771b22ea95dec427ce",
     "salt": "3ba29ee91e4c0bab2300f67996e1bb69",
-    "avatar": "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80",
+    "avatar": "https://api.dicebear.com/9.x/bottts/svg?seed=Glitch",
     "customStatus": "Connected to Relay",
-    "lastSeen": "04:15 PM"
+    "lastSeen": "online",
+    "sessionToken": "7c073b5c98270c8574dd0d948e39498f9682df5971b81ec62f5e3302a337be8a",
+    "contacts": [
+      {
+        "id": "@tony",
+        "name": "tony",
+        "tag": "@tony",
+        "avatar": "https://api.dicebear.com/9.x/bottts/svg?seed=Circuit",
+        "status": "offline",
+        "lastSeen": "offline",
+        "unreadCount": 0,
+        "disappearingTimer": 0,
+        "pinned": false,
+        "isSecret": false
+      },
+      {
+        "id": "@john",
+        "name": "john",
+        "tag": "@john",
+        "avatar": "https://api.dicebear.com/9.x/bottts/svg?seed=Circuit",
+        "status": "offline",
+        "lastSeen": "offline",
+        "unreadCount": 0,
+        "disappearingTimer": 0,
+        "pinned": false,
+        "isSecret": false
+      }
+    ],
+    "settings": {
+      "soundEffects": true,
+      "hideBlueTicks": false,
+      "theme": "matrix"
+    }
+  },
+  "@test2": {
+    "username": "test2",
+    "tag": "@test2",
+    "passwordHash": "a289ac9860b8cb247586fbd953bfbc598f545d12cb28336361061c6a2c63ef738fa19df134b3a7a89354b56bf982306752ee1e62f01155d9a31659ed646c48be",
+    "salt": "e6064118d3796e0e93e21ef62b33ee2c",
+    "avatar": "https://api.dicebear.com/9.x/adventurer/svg?seed=Luna",
+    "customStatus": "Connected to Relay",
+    "lastSeen": "04:41 PM",
+    "sessionToken": "7e695e37ecfad413e0cf3f02d4ec7fee85102192cf45b8a9c4da508a804f39b7",
+    "contacts": [
+      {
+        "id": "peer_bob",
+        "name": "bob",
+        "tag": "@bob",
+        "avatar": "https://api.dicebear.com/9.x/adventurer/svg?seed=Bob",
+        "status": "offline",
+        "lastSeen": "03:41 PM",
+        "unreadCount": 0,
+        "disappearingTimer": 0,
+        "pinned": false,
+        "isSecret": false,
+        "customStatus": "Connected to Relay"
+      },
+      {
+        "id": "peer_alice",
+        "name": "alice",
+        "tag": "@alice",
+        "avatar": "https://api.dicebear.com/9.x/bottts/svg?seed=Alice",
+        "status": "offline",
+        "lastSeen": "03:41 PM",
+        "unreadCount": 0,
+        "disappearingTimer": 0,
+        "pinned": false,
+        "isSecret": false,
+        "customStatus": "Connected to Relay"
+      }
+    ],
+    "settings": {
+      "soundEffects": true,
+      "hideBlueTicks": false,
+      "theme": "matrix"
+    }
   }
 }

@@ -18,48 +18,33 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
+  const handleQueryChange = (val) => {
+    soundFX.playKeypress();
+    setSearchQuery(val);
+    if (!val.trim()) {
+      setSearchResults([]);
+      setIsSearching(false);
+    } else {
+      setIsSearching(true);
+    }
+  };
+
   useEffect(() => {
     const cleanQ = searchQuery.trim().toLowerCase().replace(/^@/, '');
     if (!cleanQ) return;
 
     const debounceTimer = setTimeout(() => {
-      setIsSearching(true);
       socketService.searchUsers(cleanQ, (results) => {
-        // Also query known local contacts
-        const localMatches = (existingContacts || []).filter(c => /^@[A-Za-z0-9._=/-]+(:[A-Za-z0-9.-]+(?::\d+)?)?$/.test(c.tag || '') && (
-          (c.name && c.name.toLowerCase().includes(cleanQ)) ||
-          (c.tag && c.tag.toLowerCase().includes(cleanQ))
-        )).map(c => ({
-          username: c.name,
-          tag: c.tag,
-          avatar: c.avatar,
-          status: c.status || 'offline',
-          lastSeen: c.lastSeen || 'offline',
-          customStatus: c.customStatus || 'Known Contact',
-        }));
-
-        // Combine server results + local contacts (deduplicate by tag)
-        const combinedMap = new Map();
-        (results || []).forEach(u => {
-          if (u && u.tag) combinedMap.set(u.tag.toLowerCase(), u);
-        });
-        localMatches.forEach(u => {
-          if (u && u.tag && !combinedMap.has(u.tag.toLowerCase())) {
-            combinedMap.set(u.tag.toLowerCase(), u);
-          }
-        });
-
-        // Filter out self
+        // STRICT: Only operators registered in the database can be contacted
         const myTag = currentProfile?.tag?.toLowerCase();
-        const filtered = Array.from(combinedMap.values()).filter(u => u.tag?.toLowerCase() !== myTag);
-
-        setSearchResults(filtered);
+        const validUsers = (results || []).filter(u => u && u.tag && u.tag.toLowerCase() !== myTag);
+        setSearchResults(validUsers);
         setIsSearching(false);
       });
-    }, 100);
+    }, 150);
 
     return () => clearTimeout(debounceTimer);
-  }, [searchQuery, currentProfile?.tag, existingContacts]);
+  }, [searchQuery, currentProfile?.tag]);
 
   const handleStartChat = (user) => {
     soundFX.playSent();
@@ -84,10 +69,6 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
   };
 
   const cleanQuery = searchQuery.trim().replace(/^@/, '');
-  const explicitTag = searchQuery.trim().startsWith('@') ? searchQuery.trim() : `@${searchQuery.trim()}`;
-  const canOpenExplicitId = /^@[A-Za-z0-9._=/-]+(:[A-Za-z0-9.-]+(?::\d+)?)?$/.test(explicitTag)
-    && explicitTag.toLowerCase() !== currentProfile?.tag?.toLowerCase()
-    && !searchResults.some((user) => user.tag?.toLowerCase() === explicitTag.toLowerCase());
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -108,7 +89,7 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
 
         <div className="modal-body">
           <p className="modal-description">
-            Enter an operator's <strong>@username</strong> to start a conversation. Works for both <strong>online</strong> and <strong>offline</strong> registered peers.
+            Enter an operator's <strong>@username</strong> to start a conversation. Only <strong>registered</strong> operators in the database will be found.
           </p>
 
           <div className="search-input-box">
@@ -117,11 +98,7 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
               type="text"
               placeholder="Enter exact codename (e.g. shadow, neo, cipher)..."
               value={searchQuery}
-              onChange={(e) => {
-                soundFX.playKeypress();
-                const val = e.target.value;
-                setSearchQuery(val);
-              }}
+              onChange={(e) => handleQueryChange(e.target.value)}
               autoFocus
               className="cyber-input search-input-field"
             />
@@ -144,30 +121,19 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
               <div className="empty-search-state">
                 <Lock size={34} className="text-accent pulse-icon" />
                 <p>ZERO DIRECTORY LEAKAGE // PRIVATE LOOKUP</p>
-                <span>Type the recipient's @username above to find them (whether they are online or offline).</span>
+                <span>Type the recipient's @username above to search the registered database.</span>
               </div>
             ) : isSearching ? (
               <div className="empty-search-state">
                 <Radio size={32} className="text-accent pulse-icon" />
                 <p>SEARCHING REGISTERED NODES...</p>
-                <span>Scanning network directory for @{cleanQuery}...</span>
+                <span>Scanning database for @{cleanQuery}...</span>
               </div>
             ) : searchResults.length === 0 ? (
               <div className="empty-search-state">
-                <Shield size={32} className="text-accent" />
-                <p>NO OPERATOR FOUND</p>
-                <span>No matching operator was found on this relay server. Verify the codename or open direct frequency below.</span>
-                {canOpenExplicitId && (
-                  <button
-                    type="button"
-                    className="cyber-btn btn-secondary btn-sm"
-                    style={{ marginTop: '12px', width: '100%' }}
-                    onClick={() => handleStartChat({ username: cleanQuery, tag: explicitTag, id: explicitTag, status: 'offline' })}
-                  >
-                    <MessageSquare size={13} />
-                    <span>OPEN {explicitTag}</span>
-                  </button>
-                )}
+                <Shield size={32} className="text-muted" />
+                <p className="font-bold">NO REGISTERED OPERATOR FOUND</p>
+                <span>No account registered under "@{cleanQuery}". Only operators registered in the database can be contacted.</span>
               </div>
             ) : (
               <div className="results-list">

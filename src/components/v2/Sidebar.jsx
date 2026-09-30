@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Search, UserPlus, Radio, MessageSquare, X, Check, CheckCheck, Pin } from 'lucide-react';
 import { useChat } from '../../context/useChat';
 import { socketService } from '../../services/socketService';
-import { soundFX } from '../../services/audioService';
 import { DEFAULT_AVATAR } from '../../avatars';
 
 export const Sidebar = () => {
@@ -11,6 +10,7 @@ export const Sidebar = () => {
     activeContactId,
     selectContact,
     addOrSelectContact,
+    removeContact,
     openModal,
     allMessages,
     typingStatus,
@@ -18,8 +18,6 @@ export const Sidebar = () => {
   } = useChat();
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [showAddPeerModal, setShowAddPeerModal] = useState(false);
-  const [newPeerTag, setNewPeerTag] = useState('');
   const [networkResults, setNetworkResults] = useState([]);
   const [isSearchingNetwork, setIsSearchingNetwork] = useState(false);
 
@@ -60,22 +58,6 @@ export const Sidebar = () => {
     return () => clearTimeout(timer);
   }, [searchQuery, contacts]);
 
-  const handleStartDirectChat = (e) => {
-    e.preventDefault();
-    const raw = newPeerTag.trim();
-    if (!raw) return;
-    const cleanTag = raw.startsWith('@') ? raw : `@${raw}`;
-    addOrSelectContact({
-      tag: cleanTag,
-      name: cleanTag.replace(/^@/, '').split(':')[0],
-      status: 'offline',
-      lastSeen: 'offline',
-    });
-    setNewPeerTag('');
-    setShowAddPeerModal(false);
-    soundFX.playSent();
-  };
-
   return (
     <aside className="sidebar">
       {/* Sidebar Controls Header */}
@@ -111,32 +93,6 @@ export const Sidebar = () => {
         </button>
       </div>
 
-      {/* New Peer Modal / Quick Prompt */}
-      {showAddPeerModal && (
-        <div className="p-3 border-b border-border bg-bg-card">
-          <form onSubmit={handleStartDirectChat} className="flex gap-2">
-            <input
-              type="text"
-              autoFocus
-              className="cyber-input text-xs py-1.5 flex-1"
-              placeholder="Enter peer @tag (e.g. @operator)"
-              value={newPeerTag}
-              onChange={(e) => setNewPeerTag(e.target.value)}
-            />
-            <button type="submit" className="cyber-btn text-xs py-1 px-3">
-              CONNECT
-            </button>
-            <button
-              type="button"
-              className="cyber-btn btn-icon text-xs py-1 px-2"
-              onClick={() => setShowAddPeerModal(false)}
-            >
-              <X size={13} />
-            </button>
-          </form>
-        </div>
-      )}
-
       {/* Contacts List */}
       <div className="sidebar-list">
         {filteredContacts.map((contact) => {
@@ -146,11 +102,18 @@ export const Sidebar = () => {
           const isContactTyping = typingStatus[contact.id];
 
           return (
-            <button
-              type="button"
+            <div
               key={contact.id}
+              role="button"
+              tabIndex={0}
               className={`chat-item ${isSelected ? 'active' : ''}`}
               onClick={() => selectContact(contact.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  selectContact(contact.id);
+                }
+              }}
               aria-current={isSelected ? 'true' : undefined}
             >
               {/* Avatar with Status Dot */}
@@ -209,12 +172,26 @@ export const Sidebar = () => {
                     )}
                   </span>
 
-                  {contact.unreadCount > 0 && (
-                    <span className="unread-badge">{contact.unreadCount}</span>
-                  )}
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    {contact.unreadCount > 0 && (
+                      <span className="unread-badge">{contact.unreadCount}</span>
+                    )}
+                    <button
+                      type="button"
+                      className="chat-item-delete-btn"
+                      title="Remove contact"
+                      aria-label={`Remove @${(contact.tag || contact.name).replace(/^@/, '')}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeContact(contact.id);
+                      }}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
                 </div>
               </div>
-            </button>
+            </div>
           );
         })}
 

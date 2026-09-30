@@ -37,6 +37,11 @@ class StandaloneSocketService {
         this.socket.emit('resume_session', this.currentProfile, (res) => {
           if (res?.success) {
             this.callbacks.onRegistered?.({ success: true });
+            if (res.contacts || res.settings) {
+              this.callbacks.onAccountSynced?.(res);
+            }
+          } else if (res?.error === 'Session expired') {
+            this.callbacks.onForceLogout?.({ reason: 'Session expired. You were logged into this account on another device.' });
           }
         });
       }
@@ -90,6 +95,13 @@ class StandaloneSocketService {
       this.callbacks.onMessageShredded?.(data);
     });
 
+    // Single active device enforcement: kicked out because user logged in on another device
+    this.socket.on('force_logout', (data) => {
+      console.warn('[REALTIME] Force logout received:', data?.reason);
+      this.currentProfile = null;
+      this.callbacks.onForceLogout?.(data);
+    });
+
     return this.socket;
   }
 
@@ -114,7 +126,12 @@ class StandaloneSocketService {
     const doAuth = () => {
       socket.emit('authenticate_user', authData, (res) => {
         if (res?.success && res.peerInfo) {
-          this.currentProfile = res.peerInfo;
+          this.currentProfile = {
+            ...res.peerInfo,
+            sessionToken: res.sessionToken,
+            contacts: res.contacts || [],
+            settings: res.settings || null,
+          };
         }
         safeCallback(res);
       });
@@ -136,7 +153,23 @@ class StandaloneSocketService {
     const socket = this.initSocket();
 
     if (socket.connected && profile) {
-      socket.emit('resume_session', profile);
+      socket.emit('resume_session', profile, (res) => {
+        if (res?.success) {
+          this.callbacks.onRegistered?.({ success: true });
+          if (res.contacts || res.settings) {
+            this.callbacks.onAccountSynced?.(res);
+          }
+        } else if (res?.error === 'Session expired') {
+          this.callbacks.onForceLogout?.({ reason: 'Session expired. You were logged into this account on another device.' });
+        }
+      });
+    }
+  }
+
+  syncAccountState(contacts, settings) {
+    const socket = this.initSocket();
+    if (socket.connected && this.currentProfile) {
+      socket.emit('sync_account_state', { contacts, settings });
     }
   }
 
@@ -218,6 +251,9 @@ class StandaloneSocketService {
   }
 
   logoutSession() {
+    if (this.socket?.connected) {
+      this.socket.emit('logout_session');
+    }
     this.disconnect();
   }
 

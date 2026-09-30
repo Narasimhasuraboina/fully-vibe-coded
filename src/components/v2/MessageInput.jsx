@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Paperclip, Smile, X } from 'lucide-react';
+import { Send, Paperclip, Smile, X, Flame } from 'lucide-react';
 import { useChat } from '../../context/useChat';
 import { notificationService } from '../../services/notificationService';
 
@@ -10,6 +10,7 @@ export const MessageInput = () => {
   const { sendMessage, emitTyping, activeContact } = useChat();
   const [text, setText] = useState('');
   const [attachment, setAttachment] = useState(null);
+  const [isViewOnce, setIsViewOnce] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const fileInputRef = useRef(null);
   const typingTimerRef = useRef(null);
@@ -85,10 +86,14 @@ export const MessageInput = () => {
       text: text.trim(),
       type: attachment ? (attachment.type.startsWith('image/') ? 'image' : 'file') : 'text',
       file: attachment,
+      burnAfterRead: isViewOnce || (activeContact?.disappearingTimer > 0),
+      burnCountdown: isViewOnce ? 10 : (activeContact?.disappearingTimer || null),
+      isViewOnce: isViewOnce,
     });
 
     setText('');
     setAttachment(null);
+    setIsViewOnce(false);
     setShowEmojiPicker(false);
   };
 
@@ -164,6 +169,17 @@ export const MessageInput = () => {
           onClick={() => setShowEmojiPicker(!showEmojiPicker)}
         >
           <Smile size={16} />
+        </button>
+
+        <button
+          type="button"
+          className={`cyber-btn btn-icon ${isViewOnce ? 'text-danger border-danger/60 bg-danger/10 shadow-[0_0_8px_rgba(255,85,51,0.3)]' : ''}`}
+          title={isViewOnce ? "View-Once Active: Message self-destructs 10s after recipient opens it" : "Toggle View-Once (Self-destruct on read)"}
+          aria-label="Toggle View-Once message"
+          aria-pressed={isViewOnce}
+          onClick={() => setIsViewOnce(!isViewOnce)}
+        >
+          <Flame size={16} className={isViewOnce ? "animate-pulse" : ""} />
         </button>
 
         <input

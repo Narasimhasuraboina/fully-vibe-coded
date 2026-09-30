@@ -7,15 +7,49 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DATA_DIR = path.resolve(__dirname, '../data');
+const DATA_DIR = process.env.DATA_DIR || path.resolve(__dirname, '../data');
 if (!fs.existsSync(DATA_DIR)) {
   try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch { /* ignore */ }
 }
 const DB_FILE = path.join(DATA_DIR, 'users_db.json');
 const MAILBOX_FILE = path.join(DATA_DIR, 'offline_mailbox.json');
+const SQLITE_FILE = path.join(DATA_DIR, 'chatforge.sqlite');
+
+// Initialize native SQLite Engine (Zero-dependency, ACID compliant, durable across git pushes)
+let sqliteDb = null;
+try {
+  sqliteDb = new DatabaseSync(SQLITE_FILE);
+  sqliteDb.exec(`
+    PRAGMA journal_mode = WAL;
+    CREATE TABLE IF NOT EXISTS users (
+      tag TEXT PRIMARY KEY,
+      username TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      salt TEXT NOT NULL,
+      avatar TEXT,
+      custom_status TEXT,
+      session_token TEXT,
+      contacts_json TEXT,
+      settings_json TEXT,
+      last_seen TEXT,
+      created_at INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS offline_mailbox (
+      id TEXT PRIMARY KEY,
+      recipient_tag TEXT NOT NULL,
+      sender_tag TEXT NOT NULL,
+      message_json TEXT NOT NULL,
+      queued_at INTEGER NOT NULL
+    );
+  `);
+  console.log(`[DATABASE] SQLite engine initialized at ${SQLITE_FILE}`);
+} catch (err) {
+  console.warn('[DATABASE] SQLite initialization failed, falling back to JSON storage:', err.message);
+}
 
 const app = express();
 const port = Number(process.env.PORT) || 3001;
@@ -63,7 +97,7 @@ const io = new Server(server, {
 });
 
 // In-Memory Storage & Persistence
-// registeredUsers: tag (e.g. '@neo') -> { username, tag, passwordHash, salt, avatar, customStatus, socketId, status, lastSeen, sessionToken }
+// registeredUsers: tag (e.g. '@neo') -> { username, tag, passwordHash, salt, avatar, customStatus, socketId, status, lastSeen, sessionToken, contacts, settings }
 const registeredUsers = new Map();
 // offlineMailbox: recipientTag -> [ { message, senderTag, queuedAt } ]
 const offlineMailbox = new Map();
@@ -83,13 +117,57 @@ function verifyPassword(password, user) {
     // Upgrade to scrypt
     user.salt = crypto.randomBytes(16).toString('hex');
     user.passwordHash = hashPassword(password, user.salt);
-    saveUserDatabase();
+    saveUser(user);
     return true;
   }
   return false;
 }
 
 function loadDatabase() {
+  // 1. Load users from SQLite if available
+  if (sqliteDb) {
+    try {
+      const rows = sqliteDb.prepare('SELECT * FROM users').all();
+      rows.forEach((row) => {
+        let contacts = [];
+        let settings = null;
+        try { if (row.contacts_json) contacts = JSON.parse(row.contacts_json); } catch { /* ignore */ }
+        try { if (row.settings_json) settings = JSON.parse(row.settings_json); } catch { /* ignore */ }
+
+        registeredUsers.set(row.tag.toLowerCase(), {
+          username: row.username,
+          tag: row.tag,
+          passwordHash: row.password_hash,
+          salt: row.salt,
+          avatar: row.avatar,
+          customStatus: row.custom_status || 'Active Node',
+          sessionToken: row.session_token || null,
+          contacts,
+          settings,
+          lastSeen: row.last_seen || 'offline',
+          status: 'offline',
+          socketId: null,
+        });
+      });
+      console.log(`[DATABASE] Loaded ${registeredUsers.size} user account(s) from SQLite`);
+
+      // Load offline mailbox from SQLite
+      const mailboxRows = sqliteDb.prepare('SELECT * FROM offline_mailbox ORDER BY queued_at ASC').all();
+      mailboxRows.forEach((row) => {
+        try {
+          const msgObj = JSON.parse(row.message_json);
+          const rTag = row.recipient_tag.toLowerCase();
+          if (!offlineMailbox.has(rTag)) offlineMailbox.set(rTag, []);
+          offlineMailbox.get(rTag).push(msgObj);
+        } catch { /* ignore */ }
+      });
+      console.log(`[DATABASE] Loaded offline mailboxes from SQLite`);
+    } catch (err) {
+      console.error('[DATABASE] Error reading SQLite:', err);
+    }
+  }
+
+  // 2. Migration / Fallback from users_db.json
   try {
     const legacyDbFile = path.join(__dirname, 'users_db.json');
     if (!fs.existsSync(DB_FILE) && fs.existsSync(legacyDbFile)) {
@@ -100,40 +178,109 @@ function loadDatabase() {
     }
     if (fs.existsSync(DB_FILE)) {
       const data = JSON.parse(fs.readFileSync(DB_FILE, 'utf8') || '{}');
+      let importedCount = 0;
       Object.entries(data).forEach(([tag, user]) => {
-        registeredUsers.set(tag.toLowerCase(), {
-          ...user,
-          status: 'offline',
-          socketId: null,
-        });
+        const lowerTag = tag.toLowerCase();
+        if (!registeredUsers.has(lowerTag)) {
+          const newUserObj = {
+            ...user,
+            status: 'offline',
+            socketId: null,
+            contacts: user.contacts || [],
+            settings: user.settings || null,
+          };
+          registeredUsers.set(lowerTag, newUserObj);
+          if (sqliteDb) {
+            try {
+              const stmt = sqliteDb.prepare(`
+                INSERT OR REPLACE INTO users (
+                  tag, username, password_hash, salt, avatar, custom_status, session_token, contacts_json, settings_json, last_seen, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              `);
+              stmt.run(
+                newUserObj.tag,
+                newUserObj.username,
+                newUserObj.passwordHash,
+                newUserObj.salt,
+                newUserObj.avatar || '',
+                newUserObj.customStatus || 'Active Node',
+                newUserObj.sessionToken || '',
+                JSON.stringify(newUserObj.contacts || []),
+                JSON.stringify(newUserObj.settings || null),
+                newUserObj.lastSeen || 'offline',
+                Date.now()
+              );
+            } catch { /* ignore */ }
+          }
+          importedCount++;
+        }
       });
-      console.log(`[DATABASE] Loaded ${registeredUsers.size} user account(s) from ${DB_FILE}`);
+      if (importedCount > 0) {
+        console.log(`[DATABASE] Imported ${importedCount} additional user account(s) from JSON`);
+      }
     }
   } catch (err) {
     console.error('[DATABASE] Error reading users_db.json:', err);
   }
 
+  // 3. Fallback from offline_mailbox.json
   try {
     const legacyMailboxFile = path.join(__dirname, 'offline_mailbox.json');
     if (!fs.existsSync(MAILBOX_FILE) && fs.existsSync(legacyMailboxFile)) {
       try {
         fs.copyFileSync(legacyMailboxFile, MAILBOX_FILE);
-        console.log(`[DATABASE] Migrated existing mailbox to ${MAILBOX_FILE}`);
       } catch { /* ignore */ }
     }
     if (fs.existsSync(MAILBOX_FILE)) {
       const data = JSON.parse(fs.readFileSync(MAILBOX_FILE, 'utf8') || '{}');
       Object.entries(data).forEach(([tag, msgs]) => {
-        offlineMailbox.set(tag.toLowerCase(), msgs);
+        const lowerTag = tag.toLowerCase();
+        if (!offlineMailbox.has(lowerTag) && Array.isArray(msgs) && msgs.length > 0) {
+          offlineMailbox.set(lowerTag, msgs);
+        }
       });
-      console.log(`[DATABASE] Loaded offline mailboxes for ${offlineMailbox.size} user(s)`);
     }
   } catch (err) {
     console.error('[DATABASE] Error reading offline_mailbox.json:', err);
   }
 }
 
-function saveUserDatabase() {
+function saveUser(user) {
+  if (!user?.tag) return;
+  const tag = user.tag.toLowerCase();
+  registeredUsers.set(tag, user);
+
+  // Write to SQLite
+  if (sqliteDb) {
+    try {
+      const stmt = sqliteDb.prepare(`
+        INSERT OR REPLACE INTO users (
+          tag, username, password_hash, salt, avatar, custom_status, session_token, contacts_json, settings_json, last_seen, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      stmt.run(
+        user.tag,
+        user.username,
+        user.passwordHash,
+        user.salt,
+        user.avatar || '',
+        user.customStatus || '',
+        user.sessionToken || '',
+        JSON.stringify(user.contacts || []),
+        JSON.stringify(user.settings || null),
+        user.lastSeen || 'offline',
+        Date.now()
+      );
+    } catch (err) {
+      console.error('[DATABASE] Error writing user to SQLite:', err);
+    }
+  }
+
+  // Mirror to users_db.json
+  saveUserDatabaseFile();
+}
+
+function saveUserDatabaseFile() {
   try {
     const obj = {};
     registeredUsers.forEach((user, tag) => {
@@ -145,6 +292,9 @@ function saveUserDatabase() {
         avatar: user.avatar,
         customStatus: user.customStatus,
         lastSeen: user.lastSeen,
+        sessionToken: user.sessionToken || null,
+        contacts: user.contacts || [],
+        settings: user.settings || null,
       };
     });
     fs.writeFileSync(DB_FILE, JSON.stringify(obj, null, 2), 'utf8');
@@ -153,7 +303,41 @@ function saveUserDatabase() {
   }
 }
 
+function saveUserDatabase() {
+  registeredUsers.forEach((user) => {
+    saveUser(user);
+  });
+}
+
 function saveOfflineMailbox() {
+  // Save to SQLite
+  if (sqliteDb) {
+    try {
+      sqliteDb.exec('DELETE FROM offline_mailbox');
+      const insert = sqliteDb.prepare(`
+        INSERT INTO offline_mailbox (id, recipient_tag, sender_tag, message_json, queued_at)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      offlineMailbox.forEach((msgs, recipientTag) => {
+        if (Array.isArray(msgs)) {
+          msgs.forEach((item) => {
+            const msgId = item.message?.id || `mb_${Date.now()}_${Math.random()}`;
+            insert.run(
+              msgId,
+              recipientTag.toLowerCase(),
+              item.senderTag || '',
+              JSON.stringify(item),
+              item.queuedAt || Date.now()
+            );
+          });
+        }
+      });
+    } catch (err) {
+      console.error('[DATABASE] Error saving mailbox to SQLite:', err);
+    }
+  }
+
+  // Mirror to JSON
   try {
     const obj = {};
     offlineMailbox.forEach((msgs, tag) => {
@@ -258,12 +442,27 @@ io.on('connection', (socket) => {
       return callback?.({ success: false, error: 'Incorrect password. Please try again.' });
     }
 
+    const oldSocketId = existingUser.socketId;
+    const newSessionToken = crypto.randomBytes(32).toString('hex');
     existingUser.status = 'online';
     existingUser.socketId = socket.id;
     existingUser.lastSeen = 'online';
     if (avatar) existingUser.avatar = avatar;
-    existingUser.sessionToken = crypto.randomBytes(32).toString('hex');
+    existingUser.sessionToken = newSessionToken;
     authenticatedUser = existingUser;
+    saveUser(existingUser);
+
+    // Single Active Device Kickout: Disconnect any older active session
+    if (oldSocketId && oldSocketId !== socket.id) {
+      console.log(`[AUTH] Kicking old session for ${tag} (socket ${oldSocketId})`);
+      io.to(oldSocketId).emit('force_logout', {
+        reason: 'Logged in from another device or browser tab.',
+      });
+      const oldSocket = io.sockets.sockets.get(oldSocketId);
+      if (oldSocket) {
+        oldSocket.disconnect(true);
+      }
+    }
 
     console.log(`[AUTH] Authenticated user: ${tag}`);
     callback?.({
@@ -275,7 +474,9 @@ io.on('connection', (socket) => {
         customStatus: existingUser.customStatus,
         status: 'online',
       },
-      sessionToken: existingUser.sessionToken,
+      sessionToken: newSessionToken,
+      contacts: existingUser.contacts || [],
+      settings: existingUser.settings || null,
     });
 
     // Notify all clients of updated online status
@@ -299,33 +500,61 @@ io.on('connection', (socket) => {
 
   // Reconnect with active session token
   socket.on('resume_session', (profile, callback) => {
-    if (!profile?.tag) return callback?.({ success: false });
+    if (!profile?.tag) return callback?.({ success: false, error: 'Tag required' });
     const tag = profile.tag.toLowerCase();
     const existing = registeredUsers.get(tag);
-    if (existing) {
-      existing.status = 'online';
-      existing.socketId = socket.id;
-      existing.lastSeen = 'online';
-      authenticatedUser = existing;
+    if (!existing) {
+      return callback?.({ success: false, error: 'User not registered' });
+    }
 
-      callback?.({ success: true });
-      io.emit('peers_update', getPublicPeerList());
+    // Session Token Validation for Single-Session Enforcement
+    if (profile.sessionToken && existing.sessionToken && profile.sessionToken !== existing.sessionToken) {
+      console.log(`[AUTH] Stale session token for ${tag} - emitting force_logout`);
+      socket.emit('force_logout', {
+        reason: 'Session expired. You were logged into this account on another device.',
+      });
+      return callback?.({ success: false, error: 'Session expired' });
+    }
 
-      // Flush offline messages
-      const pendingMessages = offlineMailbox.get(tag) || [];
-      if (pendingMessages.length > 0) {
-        pendingMessages.forEach((item) => {
-          socket.emit('receive_message', {
-            message: item.message,
-            senderTag: item.senderTag,
-            senderInfo: item.senderInfo,
-          });
-        });
-        offlineMailbox.delete(tag);
-        saveOfflineMailbox();
+    const oldSocketId = existing.socketId;
+    existing.status = 'online';
+    existing.socketId = socket.id;
+    existing.lastSeen = 'online';
+    if (profile.sessionToken) {
+      existing.sessionToken = profile.sessionToken;
+    }
+    authenticatedUser = existing;
+    saveUser(existing);
+
+    if (oldSocketId && oldSocketId !== socket.id) {
+      io.to(oldSocketId).emit('force_logout', {
+        reason: 'Logged in from another device or browser tab.',
+      });
+      const oldSocket = io.sockets.sockets.get(oldSocketId);
+      if (oldSocket) {
+        oldSocket.disconnect(true);
       }
-    } else {
-      callback?.({ success: false });
+    }
+
+    callback?.({
+      success: true,
+      contacts: existing.contacts || [],
+      settings: existing.settings || null,
+    });
+    io.emit('peers_update', getPublicPeerList());
+
+    // Flush offline messages
+    const pendingMessages = offlineMailbox.get(tag) || [];
+    if (pendingMessages.length > 0) {
+      pendingMessages.forEach((item) => {
+        socket.emit('receive_message', {
+          message: item.message,
+          senderTag: item.senderTag,
+          senderInfo: item.senderInfo,
+        });
+      });
+      offlineMailbox.delete(tag);
+      saveOfflineMailbox();
     }
   });
 
@@ -456,12 +685,54 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Message Shred (burn after reading)
+  // Message Shred (burn after reading / auto-delete)
   socket.on('message_shredded', ({ messageId, recipientTag }) => {
-    if (!recipientTag) return;
-    const recipient = registeredUsers.get(recipientTag.toLowerCase());
-    if (recipient?.socketId) {
-      io.to(recipient.socketId).emit('message_shredded', { messageId });
+    if (!messageId) return;
+    if (recipientTag) {
+      const recipient = registeredUsers.get(recipientTag.toLowerCase());
+      if (recipient?.socketId) {
+        io.to(recipient.socketId).emit('message_shredded', { messageId });
+      }
+      // Purge from offline mailbox if pending
+      const queued = offlineMailbox.get(recipientTag.toLowerCase());
+      if (queued && queued.length > 0) {
+        const filtered = queued.filter((item) => item.message?.id !== messageId);
+        if (filtered.length !== queued.length) {
+          offlineMailbox.set(recipientTag.toLowerCase(), filtered);
+          saveOfflineMailbox();
+        }
+      }
+    }
+  });
+
+  // Cross-device account sync (contacts & settings)
+  socket.on('sync_account_state', (data) => {
+    if (!authenticatedUser) return;
+    const { contacts, settings } = data || {};
+    let changed = false;
+    if (contacts && Array.isArray(contacts)) {
+      authenticatedUser.contacts = contacts;
+      changed = true;
+    }
+    if (settings && typeof settings === 'object') {
+      authenticatedUser.settings = settings;
+      changed = true;
+    }
+    if (changed) {
+      saveUser(authenticatedUser);
+    }
+  });
+
+  // Explicit session logout
+  socket.on('logout_session', () => {
+    if (authenticatedUser) {
+      authenticatedUser.status = 'offline';
+      authenticatedUser.socketId = null;
+      authenticatedUser.sessionToken = null;
+      authenticatedUser.lastSeen = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      saveUser(authenticatedUser);
+      authenticatedUser = null;
+      io.emit('peers_update', getPublicPeerList());
     }
   });
 
@@ -470,18 +741,18 @@ io.on('connection', (socket) => {
     if (!authenticatedUser) return callback?.({ success: false, error: 'Not authenticated' });
     if (updates?.avatar) authenticatedUser.avatar = updates.avatar;
     if (updates?.customStatus) authenticatedUser.customStatus = updates.customStatus;
-    saveUserDatabase();
+    saveUser(authenticatedUser);
     callback?.({ success: true });
     io.emit('peers_update', getPublicPeerList());
   });
 
   // Disconnect
   socket.on('disconnect', () => {
-    if (authenticatedUser) {
+    if (authenticatedUser && authenticatedUser.socketId === socket.id) {
       authenticatedUser.status = 'offline';
       authenticatedUser.socketId = null;
       authenticatedUser.lastSeen = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      saveUserDatabase();
+      saveUser(authenticatedUser);
       console.log(`[DISCONNECT] ${authenticatedUser.tag} went offline`);
       io.emit('peers_update', getPublicPeerList());
     }
@@ -490,6 +761,7 @@ io.on('connection', (socket) => {
 
 // REST Health and Info Endpoints
 app.get('/healthz', (_req, res) => res.status(200).send('OK'));
+app.get('/api/health', (_req, res) => res.status(200).json({ status: 'ok', uptime: process.uptime() }));
 
 app.get('/api/info', (_req, res) => {
   let onlineCount = 0;

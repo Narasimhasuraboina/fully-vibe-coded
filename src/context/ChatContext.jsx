@@ -134,8 +134,9 @@ export const ChatProvider = ({ children }) => {
   useEffect(() => {
     if (currentUser) {
       saveAccountState(currentUser, 'contacts', contacts);
+      socketService.syncAccountState(contacts, settings);
     }
-  }, [contacts, currentUser]);
+  }, [contacts, currentUser, settings]);
 
   useEffect(() => {
     if (currentUserAccountId && messagesAccountRef.current === currentUserAccountId) {
@@ -257,6 +258,18 @@ export const ChatProvider = ({ children }) => {
     setActiveContactId(contactId);
   }, []);
 
+  // Remove contact from list
+  const removeContact = useCallback((contactId) => {
+    if (!contactId) return;
+    setContacts((prev) => prev.filter((c) => c.id !== contactId));
+    setActiveContactId((current) => (current === contactId ? null : current));
+    notificationService.pushToast({
+      title: 'CONTACT REMOVED',
+      message: 'Operator removed from node frequency list.',
+      type: 'info',
+    });
+  }, []);
+
   // Initialize Socket connection and listeners
   const setupSocketListeners = useCallback(() => {
     socketService.setListeners({
@@ -274,6 +287,38 @@ export const ChatProvider = ({ children }) => {
       },
       onProfileUpdated: (profile) => {
         if (profile?.tag === currentUserRef.current?.tag || profile?.id === currentUserRef.current?.id) setCurrentUser(profile);
+      },
+      onForceLogout: (data) => {
+        soundFX.playGlitchAlarm();
+        notificationService.pushToast({
+          title: 'SESSION TERMINATED',
+          message: data?.reason || 'You were logged out because this account was logged into on another device.',
+          type: 'warning',
+        });
+        socketService.logoutSession();
+        setCurrentUser(null);
+        setActiveContactId(null);
+        setContacts([]);
+        setMessages({});
+        setScheduledMessages([]);
+        setPinnedMessageIds({});
+        setIsConnected(false);
+        localStorage.removeItem('chatforge_my_profile');
+        saveState('my_profile', null);
+      },
+      onAccountSynced: (data) => {
+        if (data.contacts && Array.isArray(data.contacts) && data.contacts.length > 0) {
+          setContacts((prev) => {
+            const map = new Map();
+            data.contacts.forEach((c) => { if (c?.id && c?.tag) map.set(c.id, c); });
+            prev.forEach((c) => { if (c?.id && c?.tag && !map.has(c.id)) map.set(c.id, c); });
+            return Array.from(map.values());
+          });
+        }
+        if (data.settings && typeof data.settings === 'object') {
+          setSettings((prev) => ({ ...prev, ...data.settings }));
+          if (data.settings.theme) setThemeState(data.settings.theme);
+        }
       },
       onSessionExpired: () => {
         setIsConnected(false);
@@ -530,6 +575,7 @@ export const ChatProvider = ({ children }) => {
       },
       onMessageShredded: (data) => {
         const { messageId } = data;
+        soundFX.playGlitchAlarm();
         setMessages((prev) => {
           let changed = false;
           const next = { ...prev };
@@ -560,8 +606,18 @@ export const ChatProvider = ({ children }) => {
   const login = (profile) => {
     const { password: _password, ...safeProfile } = profile;
     setCurrentUser(safeProfile);
-    const loadedContacts = loadAccountState(profile, 'contacts', []);
-    const loadedSettings = loadAccountState(profile, 'gb_settings', DEFAULT_GB_SETTINGS);
+    saveState('my_profile', safeProfile);
+
+    // Merge contacts from server with locally cached contacts for new phone login
+    const serverContacts = Array.isArray(profile.contacts) ? profile.contacts : [];
+    const localContacts = loadAccountState(profile, 'contacts', []);
+    const mergedMap = new Map();
+    [...serverContacts, ...localContacts].forEach((c) => {
+      if (c?.id && c?.tag) mergedMap.set(c.id, c);
+    });
+    const loadedContacts = Array.from(mergedMap.values());
+
+    const loadedSettings = profile.settings || loadAccountState(profile, 'gb_settings', DEFAULT_GB_SETTINGS);
     const loadedScheduled = loadAccountState(profile, 'scheduled', []);
     const loadedPinned = loadAccountState(profile, 'pinned_messages', {});
 
@@ -620,8 +676,9 @@ export const ChatProvider = ({ children }) => {
       fileSize: payload.fileSize || payload.file?.size || null,
       audioDuration: payload.audioDuration || null,
       replyTo: payload.replyTo || null,
-      burnAfterRead: payload.burnAfterRead || false,
-      burnCountdown: payload.burnCountdown || null,
+      burnAfterRead: payload.burnAfterRead || (targetContact.disappearingTimer > 0),
+      burnCountdown: payload.burnCountdown || (targetContact.disappearingTimer > 0 ? targetContact.disappearingTimer : null),
+      isViewOnce: payload.isViewOnce || false,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       status: 'sent',
       reactions: {},
@@ -819,17 +876,36 @@ export const ChatProvider = ({ children }) => {
     }
   }, [activeContactId, contacts]);
 
+  // Set Contact Ephemeral Disappearing Timer
+  const setContactDisappearingTimer = useCallback((contactId, seconds) => {
+    const targetId = contactId || activeContactId;
+    if (!targetId) return;
+
+    setContacts((prev) =>
+      prev.map((c) => (c.id === targetId ? { ...c, disappearingTimer: seconds } : c))
+    );
+
+    notificationService.pushToast({
+      title: seconds > 0 ? 'EPHEMERAL TIMER ACTIVATED' : 'EPHEMERAL TIMER DISABLED',
+      message: seconds > 0
+        ? `Messages in this frequency will auto-shred ${seconds}s after being read.`
+        : 'Messages in this frequency are now persistent.',
+      type: seconds > 0 ? 'warning' : 'info',
+    });
+  }, [activeContactId]);
+
   // Shred / Burn Message
-  const shredMessage = useCallback((messageId) => {
-    if (!activeContactId) return;
-    const targetContact = contacts.find((c) => c.id === activeContactId);
+  const shredMessage = useCallback((messageId, targetContactId = null) => {
+    const contactId = targetContactId || activeContactId;
+    if (!contactId) return;
+    const targetContact = contacts.find((c) => c.id === contactId);
     soundFX.playGlitchAlarm();
 
     setMessages((prev) => {
-      const currentList = prev[activeContactId] || [];
+      const currentList = prev[contactId] || [];
       return {
         ...prev,
-        [activeContactId]: currentList.filter((m) => m.id !== messageId),
+        [contactId]: currentList.filter((m) => m.id !== messageId),
       };
     });
 
@@ -884,6 +960,7 @@ export const ChatProvider = ({ children }) => {
     activeContact,
     selectContact,
     addOrSelectContact,
+    removeContact,
     messages: messages[activeContactId] || [],
     allMessages: messages,
     pinnedMessageIds: activeContactId ? (pinnedMessageIds[activeContactId] || []) : [],
@@ -897,6 +974,7 @@ export const ChatProvider = ({ children }) => {
     forwardMessage,
     updateProfile,
     shredMessage,
+    setContactDisappearingTimer,
     sendMessage,
     reactMessage,
     deleteMessage,

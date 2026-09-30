@@ -1,1 +1,37 @@
-{}
+{
+  "@john": [
+    {
+      "message": {
+        "id": "msg_1790786570957_u8bu",
+        "sender": "user",
+        "senderTag": "@test",
+        "senderAvatar": "https://api.dicebear.com/9.x/bottts/svg?seed=Glitch",
+        "recipientTag": "@john",
+        "text": "hiii",
+        "type": "text",
+        "file": null,
+        "audioUrl": null,
+        "mediaUrl": null,
+        "code": null,
+        "language": null,
+        "fileName": null,
+        "fileSize": null,
+        "audioDuration": null,
+        "replyTo": null,
+        "burnAfterRead": false,
+        "burnCountdown": null,
+        "isViewOnce": false,
+        "timestamp": "10:12 PM",
+        "status": "sent",
+        "reactions": {}
+      },
+      "senderTag": "@test",
+      "senderInfo": {
+        "tag": "@test",
+        "username": "test",
+        "avatar": "https://api.dicebear.com/9.x/bottts/svg?seed=Glitch"
+      },
+      "queuedAt": 1790786570968
+    }
+  ]
+}

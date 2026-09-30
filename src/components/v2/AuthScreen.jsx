@@ -65,6 +65,8 @@ export const AuthScreen = () => {
           login({
             ...res.peerInfo,
             sessionToken: res.sessionToken,
+            contacts: res.contacts || [],
+            settings: res.settings || null,
           });
         }, 500);
       } else {
