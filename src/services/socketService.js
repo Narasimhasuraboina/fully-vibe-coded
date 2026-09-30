@@ -95,6 +95,11 @@ class StandaloneSocketService {
       this.callbacks.onMessageShredded?.(data);
     });
 
+    // Ephemeral disappearing timer sync (Two-way or one-way notification)
+    this.socket.on('disappearing_timer_sync', (data) => {
+      this.callbacks.onDisappearingTimerSync?.(data);
+    });
+
     // Single active device enforcement: kicked out because user logged in on another device
     this.socket.on('force_logout', (data) => {
       console.warn('[REALTIME] Force logout received:', data?.reason);
@@ -241,6 +246,13 @@ class StandaloneSocketService {
 
   emitMessageShred(messageId, recipientTag) {
     this.emitMessageShredded(messageId, recipientTag);
+  }
+
+  emitSetDisappearingTimer(recipientTag, seconds, isTwoWay = true) {
+    const socket = this.initSocket();
+    if (socket.connected) {
+      socket.emit('set_disappearing_timer', { recipientTag, seconds, isTwoWay });
+    }
   }
 
   emit(event, data, callback) {

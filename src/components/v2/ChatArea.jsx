@@ -25,7 +25,9 @@ import {
   ChevronDown,
   X,
   Eye,
-  UserMinus
+  UserMinus,
+  Users,
+  User
 } from 'lucide-react';
 import { useChat } from '../../context/useChat';
 import { MessageInput } from './MessageInput';
@@ -150,10 +152,26 @@ export const ChatArea = () => {
 
   const [showMenu, setShowMenu] = useState(false);
   const [showTimerDropdown, setShowTimerDropdown] = useState(false);
+  const [selectedTwoWay, setSelectedTwoWay] = useState(null);
+  const activeTwoWay = selectedTwoWay !== null ? selectedTwoWay : (activeContact?.isTwoWayDisappearing !== false);
   const [revealedTimers, setRevealedTimers] = useState({});
   const [copiedId, setCopiedId] = useState(null);
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const messagesEndRef = useRef(null);
+  const timerDropdownRef = useRef(null);
+
+  // Close timer dropdown on click outside
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (timerDropdownRef.current && !timerDropdownRef.current.contains(e.target)) {
+        setShowTimerDropdown(false);
+      }
+    };
+    if (showTimerDropdown) {
+      document.addEventListener('mousedown', handleOutsideClick);
+      return () => document.removeEventListener('mousedown', handleOutsideClick);
+    }
+  }, [showTimerDropdown]);
 
   // Auto-countdown effect for active ephemeral and revealed view-once messages
   useEffect(() => {
@@ -193,6 +211,10 @@ export const ChatArea = () => {
         !revealedTimers[msg.id] &&
         (msg.burnCountdown || activeContact?.disappearingTimer)
       ) {
+        // If my sent message, wait until delivered or read so recipient has opportunity to read
+        if (msg.sender === 'user' && msg.status !== 'read' && msg.status !== 'delivered') {
+          return;
+        }
         const dur = Number(msg.burnCountdown || activeContact?.disappearingTimer || 10);
         setRevealedTimers((prev) => ({
           ...prev,
@@ -353,54 +375,150 @@ export const ChatArea = () => {
             <Search size={15} />
           </button>
 
-          {/* Ephemeral Disappearing Messages Timer Dropdown */}
-          <div className="relative">
+          {/* Prominent Open Ephemeral Disappearing Controller */}
+          <div className="relative" ref={timerDropdownRef}>
             <button
               type="button"
-              className={`cyber-btn text-[11px] flex items-center gap-1.5 px-2.5 py-1 transition-colors ${
+              className={`cyber-btn text-xs flex items-center gap-1.5 px-3 py-1.5 transition-all font-mono font-medium rounded ${
                 (activeContact.disappearingTimer || 0) > 0
-                  ? 'bg-danger/15 border-danger/50 text-danger hover:bg-danger/25 shadow-[0_0_8px_rgba(239,68,68,0.25)]'
-                  : 'text-muted hover:text-text-main'
+                  ? 'bg-danger/15 border border-danger text-danger hover:bg-danger/25 shadow-[0_0_10px_rgba(239,68,68,0.3)]'
+                  : 'text-text-main border border-border/80 hover:border-danger/60 hover:text-danger'
               }`}
               onClick={() => {
                 setShowTimerDropdown(!showTimerDropdown);
                 setShowMenu(false);
               }}
-              title="Ephemeral Disappearing Messages Timer"
-              aria-label="Disappearing messages timer"
+              title="Configure Ephemeral Disappearing Messages (Two-Way or One-Way auto-destruction)"
+              aria-label="Disappearing messages configuration"
               aria-expanded={showTimerDropdown}
             >
-              <Flame size={13} className={(activeContact.disappearingTimer || 0) > 0 ? 'text-danger animate-pulse' : ''} />
-              <span className="font-mono">
+              <Flame
+                size={14}
+                className={(activeContact.disappearingTimer || 0) > 0 ? 'text-danger fill-danger animate-pulse' : 'text-danger'}
+              />
+              <span className="hidden sm:inline font-bold">
+                {(activeContact.disappearingTimer || 0) > 0
+                  ? (activeContact.isTwoWayDisappearing
+                      ? `2-WAY (${formatDisappearingTime(activeContact.disappearingTimer)})`
+                      : `1-WAY (${formatDisappearingTime(activeContact.disappearingTimer)})`)
+                  : 'DISAPPEAR: OFF'}
+              </span>
+              <span className="sm:hidden font-bold">
                 {(activeContact.disappearingTimer || 0) > 0
                   ? formatDisappearingTime(activeContact.disappearingTimer)
-                  : 'TIMER'}
+                  : 'DISAPPEAR'}
               </span>
             </button>
 
             {showTimerDropdown && (
-              <div className="absolute right-0 mt-1 w-44 bg-bg-card border border-border rounded shadow-xl z-30 py-1 text-xs animate-fadeIn">
-                <div className="px-3 py-1 text-[10px] font-bold text-muted uppercase tracking-wider border-b border-border/50">
-                  Auto-Delete Timer
-                </div>
-                {TIMER_OPTIONS.map((opt) => (
+              <div className="absolute right-0 mt-2 w-72 bg-bg-card border border-border rounded-lg shadow-2xl z-30 p-3 text-xs animate-fadeIn">
+                <div className="flex items-center justify-between pb-2 border-b border-border/60 mb-2.5">
+                  <div className="flex items-center gap-1.5 font-bold text-text-main text-xs font-mono">
+                    <Flame size={14} className="text-danger fill-danger" />
+                    <span>DISAPPEARING MESSAGES</span>
+                  </div>
                   <button
-                    key={opt.seconds}
                     type="button"
-                    className={`w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-bg-card-hover ${
-                      (activeContact.disappearingTimer || 0) === opt.seconds
-                        ? 'text-accent font-bold bg-accent/10'
-                        : 'text-text-main'
-                    }`}
+                    className="text-muted hover:text-text-main p-0.5 rounded"
+                    onClick={() => setShowTimerDropdown(false)}
+                    aria-label="Close"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+
+                {/* Mode Selector: Two-Way vs One-Way */}
+                <div className="mb-3">
+                  <div className="text-[10px] uppercase font-bold text-muted tracking-wider mb-1.5">
+                    Destruction Mode:
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5 bg-bg-main p-1 rounded border border-border">
+                    <button
+                      type="button"
+                      className={`px-2 py-1.5 rounded text-[11px] font-medium transition-all text-center flex flex-col items-center gap-0.5 ${
+                        activeTwoWay
+                          ? 'bg-danger text-white font-bold shadow-sm'
+                          : 'text-muted hover:text-text-main hover:bg-bg-card'
+                      }`}
+                      onClick={() => setSelectedTwoWay(true)}
+                    >
+                      <span className="flex items-center gap-1">
+                        <Users size={12} />
+                        <span>Two-Way</span>
+                      </span>
+                      <span className="text-[9px] opacity-80">Both Sides (Sync)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className={`px-2 py-1.5 rounded text-[11px] font-medium transition-all text-center flex flex-col items-center gap-0.5 ${
+                        !activeTwoWay
+                          ? 'bg-accent/20 border border-accent/60 text-accent font-bold shadow-sm'
+                          : 'text-muted hover:text-text-main hover:bg-bg-card'
+                      }`}
+                      onClick={() => setSelectedTwoWay(false)}
+                    >
+                      <span className="flex items-center gap-1">
+                        <User size={12} />
+                        <span>One-Way</span>
+                      </span>
+                      <span className="text-[9px] opacity-80">Sender Only</span>
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-muted mt-1.5 leading-snug">
+                    {activeTwoWay
+                      ? `⚡ Two-Way: Messages from BOTH @${(activeContact.tag || activeContact.name || 'contact').replace(/^@/, '')} and you will auto-delete on both screens.`
+                      : '⚡ One-Way: Only messages YOU send will auto-delete on both screens.'}
+                  </p>
+                </div>
+
+                {/* Duration Presets */}
+                <div>
+                  <div className="text-[10px] uppercase font-bold text-muted tracking-wider mb-1.5">
+                    Auto-Delete Timer:
+                  </div>
+                  <div className="space-y-1">
+                    {TIMER_OPTIONS.map((opt) => {
+                      const isSelected = (activeContact.disappearingTimer || 0) === opt.seconds && (opt.seconds === 0 || activeContact.isTwoWayDisappearing === activeTwoWay);
+                      return (
+                        <button
+                          key={opt.seconds}
+                          type="button"
+                          className={`w-full px-2.5 py-1.5 rounded text-left flex items-center justify-between text-xs transition-colors ${
+                            isSelected
+                              ? 'bg-danger/15 border border-danger/60 text-danger font-bold'
+                              : 'hover:bg-bg-card-hover text-text-main border border-transparent'
+                          }`}
+                          onClick={() => {
+                            setContactDisappearingTimer(activeContact.id, opt.seconds, activeTwoWay);
+                            setShowTimerDropdown(false);
+                          }}
+                        >
+                          <span className="flex items-center gap-2">
+                            {opt.seconds === 0 ? <Clock size={12} className="text-muted" /> : <Flame size={12} className="text-danger" />}
+                            <span>{opt.label}</span>
+                          </span>
+                          {isSelected && <Check size={13} className="text-danger" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Turn Off Quick Action */}
+                {(activeContact.disappearingTimer || 0) > 0 && (
+                  <button
+                    type="button"
+                    className="w-full mt-2.5 pt-2 border-t border-border/60 text-center text-xs text-muted hover:text-danger flex items-center justify-center gap-1.5 font-mono"
                     onClick={() => {
-                      setContactDisappearingTimer(activeContact.id, opt.seconds);
+                      setContactDisappearingTimer(activeContact.id, 0, false);
                       setShowTimerDropdown(false);
                     }}
                   >
-                    <span>{opt.label}</span>
-                    {(activeContact.disappearingTimer || 0) === opt.seconds && <Check size={12} />}
+                    <X size={12} />
+                    <span>Turn Off Disappearing</span>
                   </button>
-                ))}
+                )}
               </div>
             )}
           </div>
@@ -444,16 +562,6 @@ export const ChatArea = () => {
 
             {showMenu && (
               <div className="absolute right-0 mt-1 w-48 bg-bg-card border border-border rounded shadow-lg z-20 py-1 text-xs">
-                <button
-                  type="button"
-                  className="w-full px-3 py-2 text-left hover:bg-bg-card-hover flex items-center gap-2 text-text-main"
-                  onClick={() => {
-                    setShowTimerDropdown(true);
-                    setShowMenu(false);
-                  }}
-                >
-                  <Flame size={13} className="text-danger" /> Disappearing Timer
-                </button>
                 <button
                   type="button"
                   className="w-full px-3 py-2 text-left hover:bg-bg-card-hover flex items-center gap-2 text-text-main"
@@ -617,16 +725,18 @@ export const ChatArea = () => {
           <div className="flex items-center gap-2 overflow-hidden">
             <Flame size={13} className="text-danger animate-pulse flex-shrink-0" />
             <span className="text-danger font-mono font-bold text-[10px] tracking-wider flex-shrink-0">
-              DISAPPEARING ACTIVE:
+              {activeContact.isTwoWayDisappearing ? '2-WAY DISAPPEARING ACTIVE:' : 'DISAPPEARING ACTIVE:'}
             </span>
             <span className="text-text-main text-[11px] truncate">
-              Messages auto-shred {formatDisappearingTime(activeContact.disappearingTimer)} after being read.
+              {activeContact.isTwoWayDisappearing
+                ? `Messages from both operators auto-shred ${formatDisappearingTime(activeContact.disappearingTimer)} after being read.`
+                : `Outgoing messages auto-shred ${formatDisappearingTime(activeContact.disappearingTimer)} after being read.`}
             </span>
           </div>
           <button
             type="button"
             className="cyber-btn text-[10px] py-0.5 px-2 text-danger hover:bg-danger/20 font-mono ml-2 flex-shrink-0"
-            onClick={() => setContactDisappearingTimer(activeContact.id, 0)}
+            onClick={() => setContactDisappearingTimer(activeContact.id, 0, false)}
           >
             DISABLE
           </button>
@@ -643,6 +753,16 @@ export const ChatArea = () => {
           </div>
         ) : (
           messages.map((msg) => {
+            if (msg.type === 'system' || msg.isSystem) {
+              return (
+                <div key={msg.id} className="flex justify-center my-2.5">
+                  <div className="bg-bg-card/90 border border-border text-muted text-[11px] font-mono px-3.5 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm max-w-md text-center">
+                    <Flame size={12} className="text-danger flex-shrink-0" />
+                    <span>{msg.text}</span>
+                  </div>
+                </div>
+              );
+            }
             const isUser = msg.sender === 'user';
             const mediaSrc = msg.mediaUrl || msg.file?.data || msg.file?.url || msg.audioUrl;
             const isImage = (msg.file && msg.file.type?.startsWith('image/')) || msg.type === 'image';
@@ -710,7 +830,7 @@ export const ChatArea = () => {
                                   <span>
                                     {msg.isViewOnce
                                       ? `VIEW-ONCE ${revealedTimers[msg.id] ? `(${revealedTimers[msg.id].remaining}s)` : '(10s)'}`
-                                      : `DISAPPEARING ${revealedTimers[msg.id] ? `(${revealedTimers[msg.id].remaining}s)` : `(${msg.burnCountdown || activeContact.disappearingTimer || 10}s)`}`}
+                                      : `${msg.isTwoWay ? '2-WAY ' : ''}DISAPPEARING ${revealedTimers[msg.id] ? `(${revealedTimers[msg.id].remaining}s)` : `(${msg.burnCountdown || activeContact.disappearingTimer || 10}s)`}`}
                                   </span>
                                 </span>
                                 <button

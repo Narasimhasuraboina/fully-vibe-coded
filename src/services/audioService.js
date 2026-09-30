@@ -2,9 +2,9 @@
 class SoundFX {
   constructor() {
     this.ctx = null;
-    this.enabled = true;
-    this.muted = false;
-    this.masterVolume = 0.8;
+    this.enabled = false;
+    this.muted = true;
+    this.masterVolume = 0;
   }
 
   init() {

@@ -485,13 +485,21 @@ io.on('connection', (socket) => {
     // Flush any pending offline mailbox messages for this user
     const pendingMessages = offlineMailbox.get(tag) || [];
     if (pendingMessages.length > 0) {
-      console.log(`[MAILBOX] Flushing ${pendingMessages.length} offline message(s) to ${tag}`);
+      console.log(`[MAILBOX] Flushing ${pendingMessages.length} offline item(s) to ${tag}`);
       pendingMessages.forEach((item) => {
-        socket.emit('receive_message', {
-          message: item.message,
-          senderTag: item.senderTag,
-          senderInfo: item.senderInfo,
-        });
+        if (item.type === 'disappearing_timer_sync') {
+          socket.emit('disappearing_timer_sync', {
+            senderTag: item.senderTag,
+            seconds: item.seconds,
+            isTwoWay: item.isTwoWay,
+          });
+        } else {
+          socket.emit('receive_message', {
+            message: item.message,
+            senderTag: item.senderTag,
+            senderInfo: item.senderInfo,
+          });
+        }
       });
       offlineMailbox.delete(tag);
       saveOfflineMailbox();
@@ -547,11 +555,19 @@ io.on('connection', (socket) => {
     const pendingMessages = offlineMailbox.get(tag) || [];
     if (pendingMessages.length > 0) {
       pendingMessages.forEach((item) => {
-        socket.emit('receive_message', {
-          message: item.message,
-          senderTag: item.senderTag,
-          senderInfo: item.senderInfo,
-        });
+        if (item.type === 'disappearing_timer_sync') {
+          socket.emit('disappearing_timer_sync', {
+            senderTag: item.senderTag,
+            seconds: item.seconds,
+            isTwoWay: item.isTwoWay,
+          });
+        } else {
+          socket.emit('receive_message', {
+            message: item.message,
+            senderTag: item.senderTag,
+            senderInfo: item.senderInfo,
+          });
+        }
       });
       offlineMailbox.delete(tag);
       saveOfflineMailbox();
@@ -702,6 +718,35 @@ io.on('connection', (socket) => {
           saveOfflineMailbox();
         }
       }
+    }
+  });
+
+  // Ephemeral Disappearing Timer Sync (Two-Way or Peer Notification)
+  socket.on('set_disappearing_timer', (payload) => {
+    const { recipientTag, seconds, isTwoWay } = payload || {};
+    if (!recipientTag) return;
+    const cleanRecipientTag = recipientTag.toLowerCase();
+    const recipient = registeredUsers.get(cleanRecipientTag);
+    const senderTag = authenticatedUser?.tag || socket.userTag || '@anonymous';
+
+    if (recipient?.socketId) {
+      io.to(recipient.socketId).emit('disappearing_timer_sync', {
+        senderTag,
+        seconds: Number(seconds) || 0,
+        isTwoWay: !!isTwoWay,
+      });
+    } else {
+      if (!offlineMailbox.has(cleanRecipientTag)) {
+        offlineMailbox.set(cleanRecipientTag, []);
+      }
+      offlineMailbox.get(cleanRecipientTag).push({
+        type: 'disappearing_timer_sync',
+        senderTag,
+        seconds: Number(seconds) || 0,
+        isTwoWay: !!isTwoWay,
+        queuedAt: new Date().toISOString(),
+      });
+      saveOfflineMailbox();
     }
   });
 

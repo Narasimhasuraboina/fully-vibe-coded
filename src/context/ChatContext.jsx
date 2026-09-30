@@ -8,10 +8,17 @@ import { accountId, getContactId, loadDurableData, loadState, saveDurableData, s
 import { DEFAULT_AVATAR } from '../avatars';
 
 const DEFAULT_GB_SETTINGS = {
-  soundEffects: true,
+  soundEffects: false,
   hideBlueTicks: false,
   theme: 'matrix',
 };
+
+function formatDisappearingTime(sec) {
+  if (!sec) return 'Off';
+  if (sec < 60) return `${sec}s`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+  return `${Math.floor(sec / 3600)}h`;
+}
 
 export const ChatProvider = ({ children }) => {
   // 1. Current Authenticated Profile
@@ -424,6 +431,17 @@ export const ChatProvider = ({ children }) => {
           );
         }
 
+        // If incoming message has twoWay burn countdown, ensure local contact record reflects it
+        if (message.isTwoWay && message.burnCountdown > 0) {
+          setContacts((prev) =>
+            prev.map((c) =>
+              c.id === contactId
+                ? { ...c, disappearingTimer: message.burnCountdown, isTwoWayDisappearing: true }
+                : c
+            )
+          );
+        }
+
         const isCurrentlyActive = activeContactRef.current === contactId;
         const incomingMsg = {
           ...message,
@@ -589,6 +607,57 @@ export const ChatProvider = ({ children }) => {
           return changed ? next : prev;
         });
       },
+      onDisappearingTimerSync: (data) => {
+        const { senderTag, seconds, isTwoWay } = data || {};
+        if (!senderTag) return;
+        const sec = Number(seconds) || 0;
+        const matched = contactsRef.current.find(
+          (c) => c.tag?.toLowerCase() === senderTag.toLowerCase()
+        );
+
+        if (matched) {
+          const contactId = matched.id;
+          const twoWay = isTwoWay && sec > 0;
+          setContacts((prev) =>
+            prev.map((c) =>
+              c.id === contactId
+                ? {
+                    ...c,
+                    disappearingTimer: isTwoWay ? sec : c.disappearingTimer,
+                    isTwoWayDisappearing: twoWay,
+                  }
+                : c
+            )
+          );
+
+          const timeLabel = formatDisappearingTime(sec);
+          const noticeText = sec > 0
+            ? (isTwoWay
+                ? `🔥 ${senderTag} enabled Two-Way Disappearing (${timeLabel}). Messages from both operators will auto-shred after being read.`
+                : `🔥 ${senderTag} enabled One-Way Disappearing (${timeLabel}) on their outgoing messages.`)
+            : `${senderTag} turned off disappearing messages.`;
+
+          const sysMsg = {
+            id: `sys_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            sender: 'system',
+            type: 'system',
+            isSystem: true,
+            text: noticeText,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          };
+
+          setMessages((prev) => ({
+            ...prev,
+            [contactId]: [...(prev[contactId] || []), sysMsg],
+          }));
+
+          notificationService.pushToast({
+            title: sec > 0 ? (isTwoWay ? '🔥 TWO-WAY DISAPPEARING ACTIVATED' : '🔥 DISAPPEARING UPDATED') : 'DISAPPEARING DISABLED',
+            message: noticeText,
+            type: sec > 0 ? 'warning' : 'info',
+          });
+        }
+      },
     });
   }, [selectContact]);
 
@@ -678,6 +747,7 @@ export const ChatProvider = ({ children }) => {
       replyTo: payload.replyTo || null,
       burnAfterRead: payload.burnAfterRead || (targetContact.disappearingTimer > 0),
       burnCountdown: payload.burnCountdown || (targetContact.disappearingTimer > 0 ? targetContact.disappearingTimer : null),
+      isTwoWay: targetContact.isTwoWayDisappearing ?? (targetContact.disappearingTimer > 0),
       isViewOnce: payload.isViewOnce || false,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       status: 'sent',
@@ -877,20 +947,48 @@ export const ChatProvider = ({ children }) => {
   }, [activeContactId, contacts]);
 
   // Set Contact Ephemeral Disappearing Timer
-  const setContactDisappearingTimer = useCallback((contactId, seconds) => {
+  const setContactDisappearingTimer = useCallback((contactId, seconds, isTwoWay = true) => {
     const targetId = contactId || activeContactId;
     if (!targetId) return;
+    const targetContact = contactsRef.current.find((c) => c.id === targetId);
+    const sec = Number(seconds) || 0;
+    const twoWay = sec > 0 ? !!isTwoWay : false;
 
     setContacts((prev) =>
-      prev.map((c) => (c.id === targetId ? { ...c, disappearingTimer: seconds } : c))
+      prev.map((c) => (c.id === targetId ? { ...c, disappearingTimer: sec, isTwoWayDisappearing: twoWay } : c))
     );
 
+    // Sync across socket to peer
+    if (targetContact?.tag) {
+      socketService.emitSetDisappearingTimer(targetContact.tag, sec, twoWay);
+    }
+
+    const timeLabel = formatDisappearingTime(sec);
+    const noticeText = sec > 0
+      ? (twoWay
+          ? `🔥 You enabled Two-Way Disappearing (${timeLabel}). Messages from both operators will auto-shred after being read.`
+          : `🔥 You enabled One-Way Disappearing (${timeLabel}). Only your outgoing messages will auto-shred after being read.`)
+      : 'Disappearing messages turned off. Messages in this frequency are now persistent.';
+
+    // Inject system notification into active conversation thread
+    const sysMsg = {
+      id: `sys_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      sender: 'system',
+      type: 'system',
+      isSystem: true,
+      text: noticeText,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    setMessages((prev) => ({
+      ...prev,
+      [targetId]: [...(prev[targetId] || []), sysMsg],
+    }));
+
     notificationService.pushToast({
-      title: seconds > 0 ? 'EPHEMERAL TIMER ACTIVATED' : 'EPHEMERAL TIMER DISABLED',
-      message: seconds > 0
-        ? `Messages in this frequency will auto-shred ${seconds}s after being read.`
-        : 'Messages in this frequency are now persistent.',
-      type: seconds > 0 ? 'warning' : 'info',
+      title: sec > 0 ? (twoWay ? '🔥 TWO-WAY DISAPPEARING ACTIVE' : '🔥 ONE-WAY DISAPPEARING ACTIVE') : 'DISAPPEARING DISABLED',
+      message: noticeText,
+      type: sec > 0 ? 'warning' : 'info',
     });
   }, [activeContactId]);
 

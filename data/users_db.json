@@ -40,10 +40,10 @@
     "tag": "@test",
     "passwordHash": "336b993e4ebd63450e18e41b3c84ac922abba39c326d25fac64b899d090858acf4e7a11afe7219c99b8446ebe9649d0fe7e6a8e385be92771b22ea95dec427ce",
     "salt": "3ba29ee91e4c0bab2300f67996e1bb69",
-    "avatar": "https://api.dicebear.com/9.x/bottts/svg?seed=Glitch",
+    "avatar": "https://api.dicebear.com/9.x/bottts/svg?seed=Circuit",
     "customStatus": "Connected to Relay",
-    "lastSeen": "online",
-    "sessionToken": "7c073b5c98270c8574dd0d948e39498f9682df5971b81ec62f5e3302a337be8a",
+    "lastSeen": "04:53 PM",
+    "sessionToken": "f1479f574549f18b1e07c9bd00ef853e579400f77cfda4869b238b9766fd2cb7",
     "contacts": [
       {
         "id": "@tony",
