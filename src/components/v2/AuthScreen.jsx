@@ -3,15 +3,7 @@ import { ArrowRight, ShieldCheck, Eye, EyeOff, Terminal } from 'lucide-react';
 import { useChat } from '../../context/useChat';
 import { socketService } from '../../services/socketService';
 import { soundFX } from '../../services/audioService';
-
-const AVATAR_OPTIONS = [
-  'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80',
-];
+import { AVATAR_OPTIONS } from '../../avatars';
 
 export const AuthScreen = () => {
   const { login } = useChat();

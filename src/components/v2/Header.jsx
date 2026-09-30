@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Terminal, Shield, LogOut, Palette, ChevronDown, Check, Radio, Calendar, Volume2, VolumeX } from 'lucide-react';
 import { useChat } from '../../context/useChat';
 import { THEMES } from '../../themes';
+import { DEFAULT_AVATAR } from '../../avatars';
 
 export const Header = () => {
   const { 
@@ -147,7 +148,7 @@ export const Header = () => {
               title={`Logged in as ${currentUser.username} - Click to view/edit identity`}
             >
               <img
-                src={currentUser.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80'}
+                src={currentUser.avatar || DEFAULT_AVATAR}
                 alt={currentUser.username}
                 className="topbar-avatar"
               />

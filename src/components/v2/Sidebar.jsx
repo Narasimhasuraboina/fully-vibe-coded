@@ -3,6 +3,7 @@ import { Search, UserPlus, Radio, MessageSquare, X, Check, CheckCheck, Pin } fro
 import { useChat } from '../../context/useChat';
 import { socketService } from '../../services/socketService';
 import { soundFX } from '../../services/audioService';
+import { DEFAULT_AVATAR } from '../../avatars';
 
 export const Sidebar = () => {
   const {
@@ -155,7 +156,7 @@ export const Sidebar = () => {
               {/* Avatar with Status Dot */}
               <div className="relative flex-shrink-0">
                 <img
-                  src={contact.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80'}
+                  src={contact.avatar || DEFAULT_AVATAR}
                   alt={contact.name}
                   className="chat-avatar"
                 />
@@ -235,7 +236,7 @@ export const Sidebar = () => {
                 }}
               >
                 <img
-                  src={user.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80'}
+                  src={user.avatar || DEFAULT_AVATAR}
                   alt={user.username}
                   className="chat-avatar w-8 h-8"
                 />

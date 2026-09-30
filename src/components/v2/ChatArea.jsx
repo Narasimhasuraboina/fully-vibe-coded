@@ -29,6 +29,7 @@ import { useChat } from '../../context/useChat';
 import { MessageInput } from './MessageInput';
 import { EmptyState } from './EmptyState';
 import { soundFX } from '../../services/audioService';
+import { DEFAULT_AVATAR } from '../../avatars';
 
 const REACTION_EMOJIS = ['🔥', '❤️', '⚡', '💀', '👍'];
 
@@ -228,7 +229,7 @@ export const ChatArea = () => {
           {/* Peer Avatar & Details */}
           <div className="relative flex-shrink-0">
             <img
-              src={activeContact.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80'}
+              src={activeContact.avatar || DEFAULT_AVATAR}
               alt={activeContact.name}
               className="chat-avatar"
             />
@@ -684,7 +685,7 @@ export const ChatArea = () => {
           <div className="message-row received animate-fadeIn">
             <div className="message-bubble contact-bubble flex items-center gap-2 py-2 px-3 border border-accent/30 bg-bg-card">
               <img
-                src={activeContact.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80'}
+                src={activeContact.avatar || DEFAULT_AVATAR}
                 alt=""
                 className="w-5 h-5 rounded-full object-cover border border-accent/40"
               />

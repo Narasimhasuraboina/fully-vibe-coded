@@ -14,11 +14,6 @@ class StandaloneSocketService {
 
   getServerUrl() {
     if (typeof window === 'undefined') return 'http://localhost:3001';
-    // In dev mode (Vite running on port 5173), connect to backend port 3001
-    if (window.location.port === '5173') {
-      return `http://${window.location.hostname}:3001`;
-    }
-    // In production, backend serves the client from the same origin
     return window.location.origin;
   }
 
@@ -27,8 +22,8 @@ class StandaloneSocketService {
 
     const serverUrl = this.getServerUrl();
     this.socket = io(serverUrl, {
-      transports: ['websocket', 'polling'],
-      reconnectionAttempts: 25,
+      transports: ['polling', 'websocket'],
+      reconnectionAttempts: 50,
       reconnectionDelay: 1000,
       timeout: 10000,
     });

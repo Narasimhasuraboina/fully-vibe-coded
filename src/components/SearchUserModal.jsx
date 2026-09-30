@@ -3,6 +3,7 @@ import { Search, UserPlus, X, MessageSquare, Shield, Lock, Radio } from 'lucide-
 import { soundFX } from '../services/audioService';
 import { socketService } from '../services/socketService';
 import { getContactId } from '../services/storage';
+import { DEFAULT_AVATAR } from '../avatars';
 
 const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, existingContacts = [] }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -67,7 +68,7 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
       id: user.id || getContactId(cleanTag),
       name: user.username,
       tag: cleanTag,
-      avatar: user.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+      avatar: user.avatar || DEFAULT_AVATAR,
       status: user.status || 'offline',
       lastSeen: user.lastSeen || 'offline',
       ip: user.ip || '192.168.1.x',

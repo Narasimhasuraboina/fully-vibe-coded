@@ -10,15 +10,19 @@ import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DB_FILE = path.join(__dirname, 'users_db.json');
-const MAILBOX_FILE = path.join(__dirname, 'offline_mailbox.json');
+const DATA_DIR = path.resolve(__dirname, '../data');
+if (!fs.existsSync(DATA_DIR)) {
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch { /* ignore */ }
+}
+const DB_FILE = path.join(DATA_DIR, 'users_db.json');
+const MAILBOX_FILE = path.join(DATA_DIR, 'offline_mailbox.json');
 
 const app = express();
 const port = Number(process.env.PORT) || 3001;
 
 app.disable('x-powered-by');
 app.set('trust proxy', process.env.TRUST_PROXY === '1');
-app.use(cors({ origin: '*' }));
+app.use(cors({ origin: true, credentials: true }));
 app.use(compression());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -36,7 +40,7 @@ app.use((req, res, next) => {
       "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com data:",
-      "img-src 'self' data: blob: https://images.unsplash.com",
+      "img-src 'self' data: blob: https://images.unsplash.com https://api.dicebear.com",
       "media-src 'self' data: blob:",
       "connect-src 'self' ws: wss: *",
       "worker-src 'self' blob:",
@@ -52,8 +56,9 @@ const server = http.createServer(app);
 const io = new Server(server, {
   maxHttpBufferSize: 5e7, // 50MB for media/voice note payloads
   cors: {
-    origin: '*',
+    origin: (origin, callback) => callback(null, true),
     methods: ['GET', 'POST'],
+    credentials: true,
   },
 });
 
@@ -86,6 +91,13 @@ function verifyPassword(password, user) {
 
 function loadDatabase() {
   try {
+    const legacyDbFile = path.join(__dirname, 'users_db.json');
+    if (!fs.existsSync(DB_FILE) && fs.existsSync(legacyDbFile)) {
+      try {
+        fs.copyFileSync(legacyDbFile, DB_FILE);
+        console.log(`[DATABASE] Migrated existing users DB to ${DB_FILE}`);
+      } catch { /* ignore */ }
+    }
     if (fs.existsSync(DB_FILE)) {
       const data = JSON.parse(fs.readFileSync(DB_FILE, 'utf8') || '{}');
       Object.entries(data).forEach(([tag, user]) => {
@@ -102,6 +114,13 @@ function loadDatabase() {
   }
 
   try {
+    const legacyMailboxFile = path.join(__dirname, 'offline_mailbox.json');
+    if (!fs.existsSync(MAILBOX_FILE) && fs.existsSync(legacyMailboxFile)) {
+      try {
+        fs.copyFileSync(legacyMailboxFile, MAILBOX_FILE);
+        console.log(`[DATABASE] Migrated existing mailbox to ${MAILBOX_FILE}`);
+      } catch { /* ignore */ }
+    }
     if (fs.existsSync(MAILBOX_FILE)) {
       const data = JSON.parse(fs.readFileSync(MAILBOX_FILE, 'utf8') || '{}');
       Object.entries(data).forEach(([tag, msgs]) => {
@@ -200,7 +219,7 @@ io.on('connection', (socket) => {
         tag,
         passwordHash,
         salt,
-        avatar: avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+        avatar: avatar || 'https://api.dicebear.com/9.x/bottts/svg?seed=Circuit',
         customStatus: 'Connected to Relay',
         status: 'online',
         socketId: socket.id,
@@ -507,12 +526,34 @@ app.get('*path', (req, res) => {
   });
 });
 
-server.listen(port, '0.0.0.0', () => {
-  console.log(`===============================================`);
-  console.log(`[CHATFORGE RELAY] Listening on port ${port}`);
-  console.log(`[STATUS] Standalone Socket.IO Relay Active`);
-  console.log(`===============================================`);
-});
+function startServer(targetPort, retries = 5) {
+  server.removeAllListeners('error');
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      if (retries > 0) {
+        console.warn(`[CHATFORGE RELAY] Port ${targetPort} is occupied, retrying in 1s... (${retries} retries left)`);
+        setTimeout(() => {
+          try { server.close(); } catch { /* ignore */ }
+          startServer(targetPort, retries - 1);
+        }, 1000);
+      } else {
+        console.error(`[CHATFORGE RELAY] FATAL: Port ${targetPort} is already in use by another process.`);
+        process.exit(1);
+      }
+    } else {
+      console.error('[CHATFORGE RELAY] Server error:', err);
+    }
+  });
+
+  server.listen(targetPort, '0.0.0.0', () => {
+    console.log(`===============================================`);
+    console.log(`[CHATFORGE RELAY] Listening on port ${targetPort}`);
+    console.log(`[STATUS] Standalone Socket.IO Relay Active`);
+    console.log(`===============================================`);
+  });
+}
+
+startServer(port);
 
 const shutdown = (signal) => {
   console.log(`[CHATFORGE RELAY] Received ${signal}, closing server...`);

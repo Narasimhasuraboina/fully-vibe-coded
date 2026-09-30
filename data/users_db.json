@@ -1,0 +1,38 @@
+{
+  "@alice": {
+    "username": "alice",
+    "tag": "@alice",
+    "passwordHash": "0e83b3445d89232e37b88471ea7fc3d2cc64e17e68e6461af0d5d4e02a5d368dd7517bd86214944347e69d7f072e2833a67c9b7a070ea13728060b2bfb898553",
+    "salt": "09abbaf46cc9fd7e9c91149bd7093e02",
+    "avatar": "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80",
+    "customStatus": "Connected to Relay",
+    "lastSeen": "03:41 PM"
+  },
+  "@bob": {
+    "username": "bob",
+    "tag": "@bob",
+    "passwordHash": "4ea9a393510f3866935c39edadbc3cdfd697c0ab824e6cb7b702705657257a9eef1c790d2f7fc443d7bfcf5f84995cd79a0fb543255b435195f9d6f7cadcc548",
+    "salt": "1e1304b2d27dc0499a7f38ebe748eeb9",
+    "avatar": "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80",
+    "customStatus": "Connected to Relay",
+    "lastSeen": "03:41 PM"
+  },
+  "@tester": {
+    "username": "tester",
+    "tag": "@tester",
+    "passwordHash": "daf7f81507443b0f839f7f2deef44f7cb15d1bb50f8490b99ad7275eb6dc713f40c57a2e0aa25f9724c1635300dabb1b2a6f8a3c905510099b3d78f68dd0fc42",
+    "salt": "a4383660d54d852c480bc7d73126702e",
+    "avatar": "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80",
+    "customStatus": "Connected to Relay",
+    "lastSeen": "03:51 PM"
+  },
+  "@test": {
+    "username": "test",
+    "tag": "@test",
+    "passwordHash": "336b993e4ebd63450e18e41b3c84ac922abba39c326d25fac64b899d090858acf4e7a11afe7219c99b8446ebe9649d0fe7e6a8e385be92771b22ea95dec427ce",
+    "salt": "3ba29ee91e4c0bab2300f67996e1bb69",
+    "avatar": "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80",
+    "customStatus": "Connected to Relay",
+    "lastSeen": "04:15 PM"
+  }
+}

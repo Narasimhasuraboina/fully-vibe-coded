@@ -5,6 +5,7 @@ import { socketService } from '../services/socketService';
 import { soundFX } from '../services/audioService';
 import { notificationService } from '../services/notificationService';
 import { accountId, getContactId, loadDurableData, loadState, saveDurableData, saveState, loadAccountState, saveAccountState } from '../services/storage';
+import { DEFAULT_AVATAR } from '../avatars';
 
 const DEFAULT_GB_SETTINGS = {
   soundEffects: true,
@@ -242,7 +243,7 @@ export const ChatProvider = ({ children }) => {
         id: contactId,
         name: peer.username || peer.name || cleanTag.replace(/^@/, '').split(':')[0],
         tag: cleanTag,
-        avatar: peer.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+        avatar: peer.avatar || DEFAULT_AVATAR,
         status: peer.status || 'online',
         lastSeen: peer.lastSeen || 'online',
         unreadCount: 0,
@@ -356,7 +357,7 @@ export const ChatProvider = ({ children }) => {
             id: contactId,
             name: rawName,
             tag: senderTag,
-            avatar: message.senderAvatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+            avatar: message.senderAvatar || DEFAULT_AVATAR,
             status: 'online',
             lastSeen: 'online',
             unreadCount: activeContactRef.current === contactId ? 0 : 1,
@@ -686,7 +687,7 @@ export const ChatProvider = ({ children }) => {
           id: getContactId(cleanCustom),
           name: cleanCustom.replace(/^@/, '').split(':')[0],
           tag: cleanCustom,
-          avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+          avatar: DEFAULT_AVATAR,
           status: 'offline',
           lastSeen: 'offline',
           unreadCount: 0,

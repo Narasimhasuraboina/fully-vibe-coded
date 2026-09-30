@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Radio, X, CheckSquare, Square, Zap, Users } from 'lucide-react';
 import { soundFX } from '../services/audioService';
+import { DEFAULT_AVATAR } from '../avatars';
 
 const BroadcastModal = ({ contacts = [], onClose, onBroadcastMessage }) => {
   const [selectedIds, setSelectedIds] = useState(() => (contacts || []).map(c => c.id));
@@ -98,7 +99,7 @@ const BroadcastModal = ({ contacts = [], onClose, onBroadcastMessage }) => {
                       }}
                     >
                       {isChecked ? <CheckSquare size={15} className="text-accent" /> : <Square size={15} />}
-                      <img src={c.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80'} alt="" className="mini-avatar" />
+                      <img src={c.avatar || DEFAULT_AVATAR} alt="" className="mini-avatar" />
                       <span className="c-name">{c.name}</span>
                     </div>
                   );

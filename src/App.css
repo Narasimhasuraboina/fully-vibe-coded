@@ -160,10 +160,46 @@
 .login-password-wrap .login-input { padding-right: 42px; }
 .password-toggle { position: absolute; top: 50%; right: 7px; width: 30px; height: 30px; display: grid; place-items: center; color: #7e8a82; border-radius: 6px; transform: translateY(-50%); }
 .password-toggle:hover { color: var(--accent); background: #f2f7f4; }
-.avatar-options { display: flex; gap: 11px; padding: 2px 1px 4px; }
-.avatar-option { width: 39px; height: 39px; padding: 0; object-fit: cover; border: 2px solid transparent; border-radius: 50%; opacity: .7; cursor: pointer; }
-.avatar-option:hover { opacity: 1; }
-.avatar-option.selected { border-color: var(--accent); opacity: 1; box-shadow: 0 0 0 3px #167a5817; }
+.avatar-options {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 8px;
+  background: #f7faf8;
+  border: 1px solid #e1ebe4;
+  border-radius: 10px;
+  scrollbar-width: thin;
+}
+@media (max-width: 480px) {
+  .avatar-options {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+.avatar-option {
+  width: 36px;
+  height: 36px;
+  padding: 2px;
+  background: #ffffff;
+  border: 2px solid #dfe7e2;
+  border-radius: 50%;
+  opacity: .85;
+  cursor: pointer;
+  transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease, opacity .15s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+.avatar-option:hover {
+  opacity: 1;
+  transform: scale(1.12);
+  border-color: var(--accent);
+}
+.avatar-option.selected {
+  border-color: var(--accent);
+  opacity: 1;
+  transform: scale(1.15);
+  box-shadow: 0 0 0 3px #167a5822, 0 2px 6px rgba(0, 0, 0, 0.1);
+}
 .login-submit { width: 100%; min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 3px; color: #fff; background: var(--accent); border: 0; border-radius: 8px; font-size: 12px; font-weight: 700; transition: background .15s ease, transform .15s ease; }
 .login-submit:hover { background: #116748; }
 .login-submit:active { transform: translateY(1px); }
