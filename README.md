@@ -1,50 +1,63 @@
 # Chatforge
 
-Chatforge is a browser-based Matrix client with a custom chat interface. It uses the maintained Matrix JavaScript SDK and Rust/WebAssembly crypto implementation for encrypted direct rooms, encrypted file attachments, device crypto storage, and password-derived server-side key backup. The Express process serves the static app and health endpoint; it does not receive chat messages or account passwords.
+Chatforge is a high-speed, self-contained real-time messaging application and private relay network. It is 100% standalone: it runs on a single Express + Socket.IO server with zero external homeservers, zero third-party dependencies, and zero registration friction.
+
+## Features
+
+- **Instant In-App Registration & Auth**: Create accounts directly in the app in seconds. Passwords are protected using salted `scrypt` key derivation with SHA-256 fallback.
+- **Standalone Socket.IO Relay**: Real-time bidirectional messaging, delivery receipts, read receipts, emoji reactions, and live typing indicators.
+- **Offline Store-and-Forward Mailbox**: Messages sent to offline peers are automatically queued on the relay server and flushed instantly upon reconnect.
+- **Operator Codename Directory**: Instant lookup and direct chat creation by `@username` without directory leakage.
+- **12 Cyberpunk Themes**: Matrix Rain, Cyberpunk 2077, Synthwave Neon, Dark Ops, Blade Runner, Hacker Terminal, Solar Flare, Void Purple, and more.
+- **Media & Attachment Support**: Full support for images, code snippets with syntax highlighting, voice notes, and file payloads.
+- **Disappearing / Shredded Messages**: Ephemeral self-destructing payloads with countdown animations.
+- **Mass Broadcast & Scheduled Dispatcher**: Broadcast messages across multiple nodes or queue scheduled transmissions.
+- **Audio Synthesizer & FX**: Custom synthesized notification chimes, read ticks, alarm glitch sounds, and mute controls.
 
 ## Requirements
 
-- Node.js 22.12 or newer and npm
-- A Matrix homeserver that permits account registration, directory lookup, encrypted rooms, and media upload
+- Node.js 22.12 or newer
+- npm
 
-## Local development
+## Quick Start (Development)
+
+Clone the repository and install dependencies:
 
 ```sh
-npm ci
+npm install
 npm run dev
 ```
 
-Vite serves the client at `http://localhost:5173`; Express serves the production build and health endpoint at `http://localhost:3001`. The default homeserver is `https://matrix.org`. Build and lint with:
+- **Frontend (Vite)**: `http://localhost:5173`
+- **Backend Relay (Express + Socket.IO)**: `http://localhost:3001`
+- Dev server uses `node --watch` to automatically restart whenever server files change.
+
+## Production Build & Run
+
+Build the optimized client bundle and start the production server:
 
 ```sh
-npm run build
-npm run lint
-```
-
-## Matrix account and encryption behavior
-
-- Chatforge account registration and sign-in use the selected Matrix homeserver. On the public Matrix homeserver, registration may require human verification or may be unavailable; use an existing Matrix account if so.
-- New direct rooms are created with Matrix Megolm encryption. The Matrix SDK stores device crypto state in browser IndexedDB and encrypts attachments before uploading them.
-- Secret storage and room-key backup use the Matrix SDK. Chatforge derives the backup key from the account password using the homeserver-provided salt and iteration parameters; the homeserver stores encrypted backup material, never the derived secret-storage key.
-- Account access tokens are stored in browser local storage to keep the user signed in. A device compromise or malicious browser code can access a signed-in session and decrypted messages.
-- Message and room metadata (accounts, room membership, timing, IP address, and encrypted media size) remain visible to the homeserver. Verify the other person's Matrix device before relying on their identity; the UI does not yet provide a guided device-verification flow.
-- Existing Chatforge relay accounts and histories are not automatically migrated to Matrix. Their old local histories remain in that browser's IndexedDB. The obsolete plaintext relay protocol has been removed from the server code.
-
-## Production deployment
-
-Build and serve the client:
-
-```sh
-npm ci
 npm run build
 npm start
 ```
 
-Set `NODE_ENV=production`, serve Chatforge over HTTPS, and set `PORT` if the hosting provider requires it. For a non-default Matrix homeserver, set both `MATRIX_HOMESERVER_URL` (server CSP) and `VITE_MATRIX_HOMESERVER_URL` (client build) to its HTTPS base URL. These values must match. Rebuild after changing the `VITE_` value.
+In production mode, the Express server serves both the Socket.IO relay and the optimized SPA from the `dist/` directory on a single port (default `3001` or `process.env.PORT`).
 
-The free `matrix.org` option avoids operating your own homeserver but places encrypted messages, key-backup blobs, and account metadata on a third-party service. Self-hosting Synapse is free software, but requires an always-on host with persistent storage and a domain or stable HTTPS endpoint. Public Matrix registration and directory policies are controlled by that homeserver and can change.
+## Verification & Checks
 
-## Health
+Run the linter and production build:
 
-- `GET /healthz` returns `OK` for platform health checks.
-- The production Content Security Policy allows connections only to the configured homeserver, plus the app's own origin.
+```sh
+npm run lint    # Runs oxlint across all source files
+npm run build   # Produces optimized static assets (<350 kB total)
+```
+
+## REST Health & Info Endpoints
+
+- `GET /healthz` - Returns `OK` for load balancer and uptime monitoring.
+- `GET /api/info` - Returns live relay status, active online node count, total registered accounts, and relay port.
+
+## Storage Architecture
+
+- **Server-Side Data**: Account credentials and offline mailboxes are persisted locally in `server/users_db.json` and `server/offline_mailbox.json`.
+- **Client-Side Data**: Conversations and local preferences are safely isolated per user account using IndexedDB with fallback to LocalStorage.

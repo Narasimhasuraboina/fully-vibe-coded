@@ -1,1 +1,20 @@
-{}
+{
+  "@alice": {
+    "username": "alice",
+    "tag": "@alice",
+    "passwordHash": "0e83b3445d89232e37b88471ea7fc3d2cc64e17e68e6461af0d5d4e02a5d368dd7517bd86214944347e69d7f072e2833a67c9b7a070ea13728060b2bfb898553",
+    "salt": "09abbaf46cc9fd7e9c91149bd7093e02",
+    "avatar": "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80",
+    "customStatus": "Connected to Relay",
+    "lastSeen": "03:41 PM"
+  },
+  "@bob": {
+    "username": "bob",
+    "tag": "@bob",
+    "passwordHash": "4ea9a393510f3866935c39edadbc3cdfd697c0ab824e6cb7b702705657257a9eef1c790d2f7fc443d7bfcf5f84995cd79a0fb543255b435195f9d6f7cadcc548",
+    "salt": "1e1304b2d27dc0499a7f38ebe748eeb9",
+    "avatar": "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80",
+    "customStatus": "Connected to Relay",
+    "lastSeen": "03:41 PM"
+  }
+}

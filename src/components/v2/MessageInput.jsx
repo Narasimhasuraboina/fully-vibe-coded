@@ -4,7 +4,7 @@ import { useChat } from '../../context/useChat';
 import { notificationService } from '../../services/notificationService';
 
 const EMOJI_LIST = ['👍', '❤️', '🔥', '⚡', '🤖', '💀', '🛡️', '🔒', '👀', '🚀'];
-const MAX_FILE_SIZE = 18 * 1024 * 1024; // Keep encrypted uploads practical for browser memory and Matrix homeservers.
+const MAX_FILE_SIZE = 18 * 1024 * 1024; // Keep uploads practical for browser memory and relay payload limits.
 
 export const MessageInput = () => {
   const { sendMessage, emitTyping, activeContact } = useChat();

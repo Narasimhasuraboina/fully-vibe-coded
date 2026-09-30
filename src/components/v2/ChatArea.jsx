@@ -207,7 +207,7 @@ export const ChatArea = () => {
   }, [messages, pinnedMessageIds]);
 
   if (!activeContact) {
-    return <EmptyState />;
+    return <EmptyState onStartChat={() => openModal('search')} />;
   }
 
   return (
@@ -462,7 +462,7 @@ export const ChatArea = () => {
           <div className="h-full flex flex-col items-center justify-center text-muted text-xs">
             <ShieldCheck size={36} className="text-accent opacity-40 mb-2" />
             <p className="font-bold text-text-main">No messages yet</p>
-            <p className="text-[11px] text-muted mt-1">End-to-end encrypted Matrix conversation with {activeContact.name || activeContact.tag}.</p>
+            <p className="text-[11px] text-muted mt-1">End-to-end encrypted private conversation with {activeContact.name || activeContact.tag}.</p>
           </div>
         ) : (
           messages.map((msg) => {
@@ -665,7 +665,7 @@ export const ChatArea = () => {
                               <CheckCheck size={13} />
                             </span>
                           ) : (
-                            <span title="Sent through the encrypted Matrix room" className="flex items-center text-muted">
+                            <span title="Sent through secure relay" className="flex items-center text-muted">
                               <Check size={13} />
                             </span>
                           )}

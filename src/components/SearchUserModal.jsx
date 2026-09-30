@@ -2,11 +2,20 @@ import React, { useState, useEffect } from 'react';
 import { Search, UserPlus, X, MessageSquare, Shield, Lock, Radio } from 'lucide-react';
 import { soundFX } from '../services/audioService';
 import { socketService } from '../services/socketService';
+import { getContactId } from '../services/storage';
 
 const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, existingContacts = [] }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   useEffect(() => {
     const cleanQ = searchQuery.trim().toLowerCase().replace(/^@/, '');
@@ -16,7 +25,7 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
       setIsSearching(true);
       socketService.searchUsers(cleanQ, (results) => {
         // Also query known local contacts
-        const localMatches = (existingContacts || []).filter(c => /^@[A-Za-z0-9._=/-]+:[A-Za-z0-9.-]+(?::\d+)?$/.test(c.tag || '') && (
+        const localMatches = (existingContacts || []).filter(c => /^@[A-Za-z0-9._=/-]+(:[A-Za-z0-9.-]+(?::\d+)?)?$/.test(c.tag || '') && (
           (c.name && c.name.toLowerCase().includes(cleanQ)) ||
           (c.tag && c.tag.toLowerCase().includes(cleanQ))
         )).map(c => ({
@@ -55,7 +64,7 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
     soundFX.playSent();
     const cleanTag = user.tag?.startsWith('@') ? user.tag : `@${user.tag || user.username.toLowerCase()}`;
     onSelectAndAddContact({
-      id: user.id || `peer_${user.username.toLowerCase().replace(/\s+/g, '_')}`,
+      id: user.id || getContactId(cleanTag),
       name: user.username,
       tag: cleanTag,
       avatar: user.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
@@ -74,16 +83,26 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
   };
 
   const cleanQuery = searchQuery.trim().replace(/^@/, '');
+  const explicitTag = searchQuery.trim().startsWith('@') ? searchQuery.trim() : `@${searchQuery.trim()}`;
+  const canOpenExplicitId = /^@[A-Za-z0-9._=/-]+(:[A-Za-z0-9.-]+(?::\d+)?)?$/.test(explicitTag)
+    && explicitTag.toLowerCase() !== currentProfile?.tag?.toLowerCase()
+    && !searchResults.some((user) => user.tag?.toLowerCase() === explicitTag.toLowerCase());
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="cyber-modal search-user-modal" onClick={(e) => e.stopPropagation()}>
+      <div 
+        className="cyber-modal search-user-modal" 
+        role="dialog" 
+        aria-modal="true" 
+        aria-labelledby="search-modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-header">
-          <div className="modal-title">
+          <div className="modal-title" id="search-modal-title">
             <Search size={16} className="text-accent" />
             <span>LOCATE OPERATOR BY CODENAME</span>
           </div>
-          <button className="btn-close" onClick={onClose}><X size={16} /></button>
+          <button type="button" className="btn-close" onClick={onClose} aria-label="Close search modal"><X size={16} /></button>
         </div>
 
         <div className="modal-body">
@@ -135,8 +154,19 @@ const SearchUserModal = ({ currentProfile, onSelectAndAddContact, onClose, exist
             ) : searchResults.length === 0 ? (
               <div className="empty-search-state">
                 <Shield size={32} className="text-accent" />
-                <p>NO ACCOUNT FOUND</p>
-                <span>No matching account was found on this Matrix homeserver. Ask the person to create an account there, then search for their full Matrix ID.</span>
+                <p>NO OPERATOR FOUND</p>
+                <span>No matching operator was found on this relay server. Verify the codename or open direct frequency below.</span>
+                {canOpenExplicitId && (
+                  <button
+                    type="button"
+                    className="cyber-btn btn-secondary btn-sm"
+                    style={{ marginTop: '12px', width: '100%' }}
+                    onClick={() => handleStartChat({ username: cleanQuery, tag: explicitTag, id: explicitTag, status: 'offline' })}
+                  >
+                    <MessageSquare size={13} />
+                    <span>OPEN {explicitTag}</span>
+                  </button>
+                )}
               </div>
             ) : (
               <div className="results-list">

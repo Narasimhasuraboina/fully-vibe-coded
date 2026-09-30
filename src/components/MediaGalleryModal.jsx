@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   Image as ImageIcon, 
@@ -7,7 +7,7 @@ import {
   FileText, 
   Code, 
   Search, 
-  ExternalLink,
+  ExternalLink, 
   Shield 
 } from 'lucide-react';
 import { soundFX } from '../services/audioService';
@@ -15,6 +15,14 @@ import { soundFX } from '../services/audioService';
 const MediaGalleryModal = ({ contact, messages = [], onClose, onOpenMedia }) => {
   const [activeTab, setActiveTab] = useState('all'); // 'all' | 'images' | 'videos' | 'audio' | 'docs' | 'code'
   const [searchQuery, setSearchQuery] = useState('');
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   // Extract all media items from messages
   const allMediaItems = messages.filter((m) => 
@@ -42,15 +50,20 @@ const MediaGalleryModal = ({ contact, messages = [], onClose, onOpenMedia }) => 
 
   return (
     <div className="modal-backdrop cyber-modal-backdrop" onClick={onClose}>
-      <div className="cyber-modal media-vault-modal" onClick={(e) => e.stopPropagation()}>
-        
+      <div 
+        className="cyber-modal media-vault-modal" 
+        role="dialog" 
+        aria-modal="true" 
+        aria-labelledby="gallery-modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="modal-header cyber-modal-header">
-          <div className="modal-title">
+          <div className="modal-title" id="gallery-modal-title">
             <Shield size={18} className="text-accent" />
             <span>SESSION VAULT // {contact?.name || 'NODE'}</span>
           </div>
-          <button className="btn-close cyber-modal-close" onClick={onClose}>
+          <button type="button" className="btn-close cyber-modal-close" onClick={onClose} aria-label="Close session vault">
             <X size={18} />
           </button>
         </div>

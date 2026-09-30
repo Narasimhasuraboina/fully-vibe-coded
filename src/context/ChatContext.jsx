@@ -4,7 +4,7 @@ import { THEMES } from '../themes';
 import { socketService } from '../services/socketService';
 import { soundFX } from '../services/audioService';
 import { notificationService } from '../services/notificationService';
-import { accountId, loadDurableData, loadState, saveDurableData, saveState, loadAccountState, saveAccountState } from '../services/storage';
+import { accountId, getContactId, loadDurableData, loadState, saveDurableData, saveState, loadAccountState, saveAccountState } from '../services/storage';
 
 const DEFAULT_GB_SETTINGS = {
   soundEffects: true,
@@ -16,7 +16,7 @@ export const ChatProvider = ({ children }) => {
   // 1. Current Authenticated Profile
   const [currentUser, setCurrentUser] = useState(() => {
     const saved = loadState('my_profile', null);
-    if (!saved || typeof saved !== 'object' || !saved.sessionToken || !saved.matrixUserId) {
+    if (!saved || typeof saved !== 'object' || !saved.sessionToken || (!saved.tag && !saved.matrixUserId)) {
       if (saved?.password) saveState('my_profile', null);
       return null;
     }
@@ -36,7 +36,7 @@ export const ChatProvider = ({ children }) => {
 
   // 4. Contacts & Active Conversation
   const [contacts, setContacts] = useState(() => 
-    currentUser ? loadAccountState(currentUser, 'contacts', []).filter((contact) => /^@[A-Za-z0-9._=/-]+:[A-Za-z0-9.-]+(?::\d+)?$/.test(contact?.tag || '')) : []
+    currentUser ? loadAccountState(currentUser, 'contacts', []).filter((contact) => /^@[A-Za-z0-9._=/-]+(:[A-Za-z0-9.-]+(?::\d+)?)?$/.test(contact?.tag || '')) : []
   );
   const [activeContactId, setActiveContactId] = useState(null);
 
@@ -231,7 +231,7 @@ export const ChatProvider = ({ children }) => {
   const addOrSelectContact = useCallback((peer) => {
     if (!peer) return;
     const cleanTag = peer.tag?.startsWith('@') ? peer.tag : `@${peer.tag || peer.username}`;
-    const contactId = peer.id || `peer_${cleanTag.replace(/^@/, '').toLowerCase()}`;
+    const contactId = peer.id || getContactId(cleanTag);
 
     setContacts((prev) => {
       const existing = prev.find((c) => c.tag?.toLowerCase() === cleanTag.toLowerCase());
@@ -240,7 +240,7 @@ export const ChatProvider = ({ children }) => {
       }
       const newContact = {
         id: contactId,
-        name: peer.username || peer.name || cleanTag.replace(/^@/, ''),
+        name: peer.username || peer.name || cleanTag.replace(/^@/, '').split(':')[0],
         tag: cleanTag,
         avatar: peer.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
         status: peer.status || 'online',
@@ -272,7 +272,7 @@ export const ChatProvider = ({ children }) => {
         }
       },
       onProfileUpdated: (profile) => {
-        if (profile?.matrixUserId === currentUserRef.current?.matrixUserId) setCurrentUser(profile);
+        if (profile?.tag === currentUserRef.current?.tag || profile?.id === currentUserRef.current?.id) setCurrentUser(profile);
       },
       onSessionExpired: () => {
         setIsConnected(false);
@@ -285,6 +285,26 @@ export const ChatProvider = ({ children }) => {
         setMessages({});
         messagesAccountRef.current = null;
         saveState('my_profile', null);
+      },
+      onPeersUpdate: (peers) => {
+        if (!Array.isArray(peers)) return;
+        const peerMap = new Map();
+        peers.forEach((p) => {
+          if (p?.tag) peerMap.set(p.tag.toLowerCase(), p);
+        });
+        setContacts((prev) =>
+          prev.map((c) => {
+            const peer = peerMap.get(c.tag?.toLowerCase());
+            if (!peer) return c;
+            return {
+              ...c,
+              status: peer.status || c.status,
+              lastSeen: peer.lastSeen || c.lastSeen,
+              customStatus: peer.customStatus || c.customStatus,
+              avatar: peer.avatar || c.avatar,
+            };
+          })
+        );
       },
       onPeerOnline: (data) => {
         const peer = data?.peer || data;
@@ -330,8 +350,8 @@ export const ChatProvider = ({ children }) => {
 
         let contactId;
         if (!matchedContact) {
-          const rawName = senderTag.replace(/^@/, '');
-          contactId = `peer_${rawName.toLowerCase()}`;
+          const rawName = senderTag.replace(/^@/, '').split(':')[0];
+          contactId = getContactId(senderTag);
           const newContact = {
             id: contactId,
             name: rawName,
@@ -400,7 +420,7 @@ export const ChatProvider = ({ children }) => {
       onOwnMessageReceived: ({ message, recipientTag }) => {
         if (!message?.id || !recipientTag) return;
         const existingContact = contactsRef.current.find((contact) => contact.tag?.toLowerCase() === recipientTag.toLowerCase());
-        const contactId = existingContact?.id || `peer_${recipientTag.toLowerCase()}`;
+        const contactId = existingContact?.id || getContactId(recipientTag);
         if (!existingContact) {
           const username = recipientTag.split(':')[0].replace(/^@/, '');
           setContacts((prev) => prev.some((contact) => contact.tag?.toLowerCase() === recipientTag.toLowerCase()) ? prev : [{
@@ -663,8 +683,8 @@ export const ChatProvider = ({ children }) => {
       let contact = contacts.find((c) => c.tag?.toLowerCase() === cleanCustom.toLowerCase());
       if (!contact) {
         contact = {
-          id: `peer_${cleanCustom.replace(/^@/, '').toLowerCase()}`,
-          name: cleanCustom.replace(/^@/, ''),
+          id: getContactId(cleanCustom),
+          name: cleanCustom.replace(/^@/, '').split(':')[0],
           tag: cleanCustom,
           avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
           status: 'offline',
@@ -705,23 +725,25 @@ export const ChatProvider = ({ children }) => {
       const localHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
       const utcHHMM = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`;
 
-      setScheduledMessages((prev) => {
-        let hasDispatched = false;
-        const updated = prev.map((item) => {
-          if (item.status === 'pending' && (item.scheduledTime === localHHMM || item.scheduledTime === utcHHMM)) {
-            hasDispatched = true;
-            sendMessage({ text: item.message, type: 'text' }, item.contactId);
-            notificationService.pushToast({
-              title: 'SCHEDULE DISPATCHED',
-              message: `Auto-delivered scheduled transmission to ${item.contactName || 'Node'}`,
-              type: 'success',
-            });
-            return { ...item, status: 'dispatched' };
-          }
-          return item;
+      const toDispatch = scheduledMessages.filter(
+        (item) => item.status === 'pending' && (item.scheduledTime === localHHMM || item.scheduledTime === utcHHMM)
+      );
+
+      if (toDispatch.length > 0) {
+        setScheduledMessages((prev) =>
+          prev.map((item) =>
+            toDispatch.some((d) => d.id === item.id) ? { ...item, status: 'dispatched' } : item
+          )
+        );
+        toDispatch.forEach((item) => {
+          sendMessage({ text: item.message, type: 'text' }, item.contactId);
+          notificationService.pushToast({
+            title: 'SCHEDULE DISPATCHED',
+            message: `Auto-delivered scheduled transmission to ${item.contactName || 'Node'}`,
+            type: 'success',
+          });
         });
-        return hasDispatched ? updated : prev;
-      });
+      }
     }, 1000);
 
     return () => clearInterval(interval);

@@ -35,14 +35,14 @@ export const AuthScreen = () => {
       return;
     }
 
-    if (!/^[a-zA-Z0-9_]+$/.test(cleanUser)) {
-      setErrorMsg('Codename can only contain letters, digits, and underscores.');
+    if (!/^[a-zA-Z0-9_.-]+$/.test(cleanUser)) {
+      setErrorMsg('Username can only contain letters, numbers, dots, dashes, and underscores.');
       soundFX.playGlitchAlarm();
       return;
     }
 
-    if (!password || password.length < (authMode === 'register' ? 10 : 4)) {
-      setErrorMsg(authMode === 'register' ? 'Use a password with at least 10 characters.' : 'Password must be at least 4 characters.');
+    if (!password || password.length < (authMode === 'register' ? 6 : 4)) {
+      setErrorMsg(authMode === 'register' ? 'Password must be at least 6 characters.' : 'Password must be at least 4 characters.');
       soundFX.playGlitchAlarm();
       return;
     }
@@ -68,7 +68,7 @@ export const AuthScreen = () => {
       setLoading(false);
       if (res && res.success) {
         soundFX.playSent();
-        setSuccessMsg(authMode === 'register' ? 'REGISTRATION SUCCESSFUL // INITIALIZING...' : 'ACCESS GRANTED // INITIALIZING...');
+        setSuccessMsg(authMode === 'register' ? 'ACCOUNT CREATED // INITIALIZING...' : 'ACCESS GRANTED // INITIALIZING...');
         setTimeout(() => {
           login({
             ...res.peerInfo,
@@ -77,7 +77,7 @@ export const AuthScreen = () => {
         }, 500);
       } else {
         soundFX.playGlitchAlarm();
-        setErrorMsg(res?.error || 'The Matrix homeserver rejected the request.');
+        setErrorMsg(res?.error || 'Authentication rejected by relay server.');
       }
     });
   };
@@ -93,11 +93,11 @@ export const AuthScreen = () => {
           </div>
           <div className="login-security">
             <ShieldCheck size={14} />
-            <span>Protected account</span>
+            <span>Private relay</span>
           </div>
         </div>
 
-        <p className="login-subtitle">Sign in to {import.meta.env?.VITE_MATRIX_HOMESERVER_URL || 'https://matrix.org'}. New direct rooms use end-to-end encryption.</p>
+        <p className="login-subtitle">Connect to your private, self-hosted messaging workspace.</p>
 
         {/* Mode Switcher Tabs */}
         <div className="login-tabs">
@@ -142,10 +142,10 @@ export const AuthScreen = () => {
             <input
               id="auth-username"
               type="text"
-              maxLength={32}
+              maxLength={authMode === 'login' ? 128 : 32}
               autoFocus
               className="login-input"
-              placeholder="Choose a username"
+              placeholder={authMode === 'login' ? 'Username or @user:homeserver' : 'Choose a username'}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               disabled={loading}

@@ -14,14 +14,15 @@ import MediaGalleryModal from './components/MediaGalleryModal';
 import MediaViewerModal from './components/MediaViewerModal';
 import ForwardModal from './components/ForwardModal';
 import ProfileModal from './components/ProfileModal';
+import SearchUserModal from './components/SearchUserModal';
 import { THEMES } from './themes';
 import './legacy.css';
 import './App.css';
 
 function MainAppShell() {
-  const { 
-    currentUser, 
-    activeContactId, 
+  const {
+    currentUser,
+    activeContactId,
     activeContact,
     contacts,
     messages,
@@ -31,6 +32,7 @@ function MainAppShell() {
     modalData,
     closeModal,
     openModal,
+    addOrSelectContact,
     broadcastMessage,
     scheduleMessage,
     forwardMessage,
@@ -55,7 +57,7 @@ function MainAppShell() {
       <MatrixBackground enabled={true} color={THEMES[theme]?.accent || '#00ff66'} />
       <ToastNotification />
       <Header />
-      
+
       <main className={`chatforge-main-layout ${layoutClass}`}>
         <Sidebar />
         <ChatArea />
@@ -119,6 +121,15 @@ function MainAppShell() {
           onSaveProfile={updateProfile}
           onClose={closeModal}
           serverInfo={serverInfo}
+        />
+      )}
+
+      {activeModal === 'search' && (
+        <SearchUserModal
+          currentProfile={currentUser}
+          existingContacts={contacts}
+          onSelectAndAddContact={addOrSelectContact}
+          onClose={closeModal}
         />
       )}
     </div>

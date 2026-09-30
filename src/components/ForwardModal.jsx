@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   Send, 
@@ -14,6 +14,14 @@ const ForwardModal = ({ message, contacts = [], onClose, onForwardMessage }) => 
   const [search, setSearch] = useState('');
   const [customTag, setCustomTag] = useState('');
 
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   const filteredContacts = contacts.filter((c) =>
     (c.name || '').toLowerCase().includes(search.toLowerCase()) ||
     (c.tag || '').toLowerCase().includes(search.toLowerCase())
@@ -27,22 +35,30 @@ const ForwardModal = ({ message, contacts = [], onClose, onForwardMessage }) => 
   };
 
   const handleSendForward = () => {
+    if (selectedContacts.length === 0 && !customTag.trim()) return;
     soundFX.playSent();
     onForwardMessage(selectedContacts, customTag.trim());
     onClose();
   };
 
+  if (!message) return null;
+
   return (
     <div className="modal-backdrop cyber-modal-backdrop" onClick={onClose}>
-      <div className="cyber-modal forward-modal" onClick={(e) => e.stopPropagation()}>
-        
+      <div 
+        className="cyber-modal forward-modal" 
+        role="dialog" 
+        aria-modal="true" 
+        aria-labelledby="forward-modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="modal-header cyber-modal-header">
-          <div className="modal-title">
+          <div className="modal-title" id="forward-modal-title">
             <CornerUpRight size={18} className="text-accent" />
             <span>FORWARD ENCRYPTED PAYLOAD</span>
           </div>
-          <button className="btn-close cyber-modal-close" onClick={onClose}>
+          <button type="button" className="btn-close cyber-modal-close" onClick={onClose} aria-label="Close forward modal">
             <X size={18} />
           </button>
         </div>

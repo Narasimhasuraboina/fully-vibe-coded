@@ -7,7 +7,7 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "dev": "concurrently -n \"SERVER,CLIENT\" -c \"magenta,cyan\" \"node server/server.js\" \"vite\"",
+    "dev": "concurrently -n \"SERVER,CLIENT\" -c \"magenta,cyan\" \"node --watch server/server.js\" \"vite\"",
     "start": "node server/server.js",
     "serve": "npm run build && node server/server.js",
     "server": "node server/server.js",
@@ -17,12 +17,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "compression": "^1.8.2",
+    "cors": "^2.8.6",
     "express": "^5.2.1",
     "lucide-react": "^1.37.0",
-    "matrix-encrypt-attachment": "^1.0.3",
-    "matrix-js-sdk": "^43.0.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "socket.io": "^4.8.4",
+    "socket.io-client": "^4.8.4"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^6.1.1",

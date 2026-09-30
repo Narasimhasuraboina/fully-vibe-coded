@@ -144,6 +144,12 @@
 .login-alert { margin-bottom: 14px; padding: 10px 12px; border-radius: 8px; font-size: 12px; }
 .login-alert.error { color: #a13e3e; background: #fff1f0; border: 1px solid #f4d4d1; }
 .login-alert.success { color: #236e4e; background: #eef8f1; border: 1px solid #d3ebda; }
+.matrix-registration-info { padding: 16px; color: #526259; background: #f4f8f5; border: 1px solid #e1ebe4; border-radius: 10px; }
+.matrix-registration-info h2 { margin: 0 0 7px; color: #263a2f; font-size: 14px; }
+.matrix-registration-info p { margin: 0; font-size: 12px; line-height: 1.6; }
+.matrix-registration-info a { min-height: 42px; display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 15px; padding: 0 14px; color: #fff; background: var(--accent); border-radius: 8px; font-size: 12px; font-weight: 700; text-decoration: none; }
+.matrix-registration-info a:hover { background: #116748; }
+.matrix-registration-info a:focus-visible { outline: 3px solid #167a5850; outline-offset: 2px; }
 .login-form { display: flex; flex-direction: column; gap: 16px; }
 .login-field { display: flex; flex-direction: column; gap: 7px; }
 .login-field > label { color: #4c5a51; font-size: 11px; font-weight: 650; }

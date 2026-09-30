@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, X, Check, Globe } from 'lucide-react';
 import { soundFX } from '../services/audioService';
 
@@ -18,6 +18,14 @@ const ProfileModal = ({ currentProfile, onSaveProfile, onClose, serverInfo }) =>
   const appAddress = window.location.protocol === 'https:'
     ? window.location.origin
     : `http://${serverInfo?.localIP || window.location.hostname}:${serverInfo?.port || 3001}`;
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -40,7 +48,7 @@ const ProfileModal = ({ currentProfile, onSaveProfile, onClose, serverInfo }) =>
             <User size={16} className="text-accent" />
             <span id="profile-dialog-title">Profile and device access</span>
           </div>
-          <button className="btn-close" onClick={onClose}><X size={16} /></button>
+          <button type="button" className="btn-close" onClick={onClose} aria-label="Close profile modal"><X size={16} /></button>
         </div>
 
         <div className="modal-body">

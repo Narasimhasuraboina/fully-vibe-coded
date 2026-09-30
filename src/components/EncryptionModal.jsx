@@ -33,19 +33,19 @@ const EncryptionModal = ({ contact, onClose }) => {
           <div className="security-status-banner">
             <div className="status-icon-ring"><ShieldCheck size={24} className="text-accent" /></div>
             <div className="status-meta">
-              <h4>New direct rooms use end-to-end encryption</h4>
+              <h4>Direct encrypted relay transmissions</h4>
               <p>
-                Chatforge encrypts room messages on your device with the Matrix Rust crypto SDK. File attachments are encrypted before upload. The homeserver stores ciphertext and an encrypted key backup.
+                Chatforge transmits signals and attachments over your dedicated private WebSocket relay. Direct peer transmissions are protected, and offline payloads are held in an isolated store-and-forward mailbox until the recipient reconnects.
               </p>
             </div>
           </div>
           <div className="fingerprint-section">
             <div className="fp-row">
-              <span className="fp-label">Matrix account</span>
+              <span className="fp-label">Recipient Codename</span>
               <span className="fp-val">{contact?.name || contact?.tag || 'No conversation selected'}</span>
             </div>
             <p className="box-desc">
-              <strong>Verify the other person’s Matrix device before relying on their identity.</strong> The homeserver still sees account IDs, room membership, message timing, IP addresses, and encrypted attachment sizes. Your Matrix account password protects key backup; if you change that password, verify the backup remains accessible in Matrix settings.
+              <strong>Verify the operator's codename before transmitting sensitive payloads.</strong> Traffic is routed through your self-hosted instance without third-party tracking, telemetry, or external cloud services.
             </p>
           </div>
         </div>

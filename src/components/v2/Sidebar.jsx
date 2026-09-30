@@ -10,6 +10,7 @@ export const Sidebar = () => {
     activeContactId,
     selectContact,
     addOrSelectContact,
+    openModal,
     allMessages,
     typingStatus,
     allPinnedMessageIds = {},
@@ -60,11 +61,12 @@ export const Sidebar = () => {
 
   const handleStartDirectChat = (e) => {
     e.preventDefault();
-    if (!newPeerTag.trim()) return;
-    const cleanTag = newPeerTag.trim().startsWith('@') ? newPeerTag.trim() : `@${newPeerTag.trim()}`;
+    const raw = newPeerTag.trim();
+    if (!raw) return;
+    const cleanTag = raw.startsWith('@') ? raw : `@${raw}`;
     addOrSelectContact({
       tag: cleanTag,
-      name: cleanTag.replace(/^@/, ''),
+      name: cleanTag.replace(/^@/, '').split(':')[0],
       status: 'offline',
       lastSeen: 'offline',
     });
@@ -100,8 +102,9 @@ export const Sidebar = () => {
         <button
           type="button"
           className="cyber-btn btn-icon"
-          title="Direct Comms / Add Peer"
-          onClick={() => setShowAddPeerModal(true)}
+          title="Search Directory / Add Operator"
+          aria-label="Search Directory"
+          onClick={() => openModal('search')}
         >
           <UserPlus size={15} />
         </button>

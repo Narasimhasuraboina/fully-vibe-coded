@@ -25,6 +25,11 @@ export const accountId = (profile) => {
   return String(tag || '').trim().toLowerCase().replace(/[^a-z0-9_@-]/g, '_');
 };
 
+export const getContactId = (profileOrTag) => {
+  const tag = typeof profileOrTag === 'string' ? profileOrTag : profileOrTag?.tag || profileOrTag?.username || profileOrTag?.id;
+  return `contact_${String(tag || '').trim().toLowerCase().replace(/[^a-z0-9_@-]/g, '_')}`;
+};
+
 export const loadAccountState = (profile, key, defaultValue) => {
   const id = accountId(profile);
   return id ? loadState(`account_${id}_${key}`, defaultValue) : defaultValue;

@@ -52,7 +52,7 @@ export const Header = () => {
       <div className="topbar-center hidden md:flex">
         <div className="security-tag">
           <Shield size={12} />
-          <span>Encrypted Matrix connection</span>
+          <span>Encrypted Relay Active</span>
         </div>
         <span className="text-muted text-xs">PORT {serverInfo.port || 3001}</span>
       </div>
