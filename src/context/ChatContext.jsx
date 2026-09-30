@@ -424,6 +424,8 @@ export const ChatProvider = ({ children }) => {
               c.id === contactId
                 ? {
                     ...c,
+                    status: 'online',
+                    lastSeen: 'online',
                     unreadCount: activeContactRef.current === contactId ? 0 : (c.unreadCount || 0) + 1,
                   }
                 : c
@@ -436,7 +438,7 @@ export const ChatProvider = ({ children }) => {
           setContacts((prev) =>
             prev.map((c) =>
               c.id === contactId
-                ? { ...c, disappearingTimer: message.burnCountdown, isTwoWayDisappearing: true }
+                ? { ...c, status: 'online', lastSeen: 'online', disappearingTimer: message.burnCountdown, isTwoWayDisappearing: true }
                 : c
             )
           );
@@ -560,6 +562,13 @@ export const ChatProvider = ({ children }) => {
         );
         if (matched) {
           const contactId = matched.id;
+          setContacts((prev) =>
+            prev.map((c) =>
+              c.id === contactId && c.status !== 'online'
+                ? { ...c, status: 'online', lastSeen: 'online' }
+                : c
+            )
+          );
           if (typingTimersRef.current[contactId]) {
             clearTimeout(typingTimersRef.current[contactId]);
             delete typingTimersRef.current[contactId];
@@ -611,24 +620,49 @@ export const ChatProvider = ({ children }) => {
         const { senderTag, seconds, isTwoWay } = data || {};
         if (!senderTag) return;
         const sec = Number(seconds) || 0;
-        const matched = contactsRef.current.find(
-          (c) => c.tag?.toLowerCase() === senderTag.toLowerCase()
-        );
+        const cleanSender = String(senderTag).toLowerCase().trim();
+        const cleanSenderNoAt = cleanSender.replace(/^@/, '');
+        const currentContacts = contactsRef.current;
+        const matched = currentContacts.find((c) => {
+          const cTag = (c.tag || '').toLowerCase().trim();
+          return cTag === cleanSender || cTag.replace(/^@/, '') === cleanSenderNoAt;
+        });
 
-        if (matched) {
-          const contactId = matched.id;
-          const twoWay = isTwoWay && sec > 0;
+        const twoWay = isTwoWay && sec > 0;
+        let contactId;
+        if (!matched) {
+          const rawName = cleanSenderNoAt.split(':')[0];
+          const standardTag = cleanSender.startsWith('@') ? cleanSender : `@${cleanSender}`;
+          contactId = getContactId(standardTag);
+          const newContact = {
+            id: contactId,
+            name: rawName,
+            tag: standardTag,
+            avatar: DEFAULT_AVATAR,
+            status: 'online',
+            lastSeen: 'online',
+            unreadCount: 0,
+            disappearingTimer: isTwoWay ? sec : 0,
+            isTwoWayDisappearing: twoWay,
+            pinned: false,
+          };
+          setContacts((prev) => [newContact, ...prev]);
+        } else {
+          contactId = matched.id;
           setContacts((prev) =>
             prev.map((c) =>
               c.id === contactId
                 ? {
                     ...c,
+                    status: 'online',
+                    lastSeen: 'online',
                     disappearingTimer: isTwoWay ? sec : c.disappearingTimer,
                     isTwoWayDisappearing: twoWay,
                   }
                 : c
             )
           );
+        }
 
           const timeLabel = formatDisappearingTime(sec);
           const noticeText = sec > 0
@@ -950,13 +984,19 @@ export const ChatProvider = ({ children }) => {
   const setContactDisappearingTimer = useCallback((contactId, seconds, isTwoWay = true) => {
     const targetId = contactId || activeContactId;
     if (!targetId) return;
-    const targetContact = contactsRef.current.find((c) => c.id === targetId);
+    const targetContact = contactsRef.current.find((c) => c.id === targetId || c.tag === targetId);
     const sec = Number(seconds) || 0;
     const twoWay = sec > 0 ? !!isTwoWay : false;
 
-    setContacts((prev) =>
-      prev.map((c) => (c.id === targetId ? { ...c, disappearingTimer: sec, isTwoWayDisappearing: twoWay } : c))
-    );
+    setContacts((prev) => {
+      const updated = prev.map((c) =>
+        c.id === targetId || (targetContact && c.tag?.toLowerCase() === targetContact.tag?.toLowerCase())
+          ? { ...c, disappearingTimer: sec, isTwoWayDisappearing: twoWay }
+          : c
+      );
+      contactsRef.current = updated;
+      return updated;
+    });
 
     // Sync across socket to peer
     if (targetContact?.tag) {

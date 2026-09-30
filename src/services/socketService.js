@@ -251,7 +251,12 @@ class StandaloneSocketService {
   emitSetDisappearingTimer(recipientTag, seconds, isTwoWay = true) {
     const socket = this.initSocket();
     if (socket.connected) {
-      socket.emit('set_disappearing_timer', { recipientTag, seconds, isTwoWay });
+      socket.emit('set_disappearing_timer', {
+        senderTag: this.currentProfile?.tag,
+        recipientTag,
+        seconds,
+        isTwoWay,
+      });
     }
   }
 

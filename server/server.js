@@ -369,6 +369,22 @@ function getPublicPeerList() {
   return peers;
 }
 
+function touchUserOnline(tag, socketId) {
+  if (!tag || tag === '@anonymous') return;
+  const cleanTag = tag.toLowerCase();
+  const user = registeredUsers.get(cleanTag);
+  if (user) {
+    const wasOffline = user.status !== 'online';
+    user.status = 'online';
+    if (socketId) user.socketId = socketId;
+    user.lastSeen = 'online';
+    if (wasOffline) {
+      saveUser(user);
+      io.emit('peers_update', getPublicPeerList());
+    }
+  }
+}
+
 // Socket.io Real-time Relay
 io.on('connection', (socket) => {
   let authenticatedUser = null;
@@ -584,13 +600,23 @@ io.on('connection', (socket) => {
     const senderTag = authenticatedUser?.tag || message.senderTag || '@anonymous';
     const senderUser = registeredUsers.get(senderTag.toLowerCase());
 
+    // Touch sender as online
+    touchUserOnline(senderTag, socket.id);
+
     const senderInfo = {
       tag: senderTag,
       username: senderUser?.username || senderTag.replace(/^@/, ''),
       avatar: senderUser?.avatar || message.senderAvatar,
     };
 
-    if (recipient && recipient.socketId && recipient.status === 'online') {
+    const isRecipientConnected = Boolean(
+      recipient &&
+      recipient.socketId &&
+      (recipient.status === 'online' || io.sockets.sockets.has(recipient.socketId))
+    );
+
+    if (isRecipientConnected) {
+      touchUserOnline(cleanRecipientTag, recipient.socketId);
       // Deliver in real-time
       io.to(recipient.socketId).emit('receive_message', {
         message,
@@ -646,11 +672,13 @@ io.on('connection', (socket) => {
 
   // Typing Indicator
   socket.on('typing', ({ recipientTag, isTyping }) => {
-    if (!recipientTag || !authenticatedUser) return;
+    if (!recipientTag) return;
+    const senderTag = authenticatedUser?.tag || socket.userTag;
+    if (senderTag) touchUserOnline(senderTag, socket.id);
     const recipient = registeredUsers.get(recipientTag.toLowerCase());
     if (recipient?.socketId) {
       io.to(recipient.socketId).emit('typing', {
-        senderTag: authenticatedUser.tag,
+        senderTag: senderTag || '@operator',
         isTyping: Boolean(isTyping),
       });
     }
@@ -723,11 +751,13 @@ io.on('connection', (socket) => {
 
   // Ephemeral Disappearing Timer Sync (Two-Way or Peer Notification)
   socket.on('set_disappearing_timer', (payload) => {
-    const { recipientTag, seconds, isTwoWay } = payload || {};
+    const { recipientTag, seconds, isTwoWay, senderTag: explicitSender } = payload || {};
     if (!recipientTag) return;
     const cleanRecipientTag = recipientTag.toLowerCase();
     const recipient = registeredUsers.get(cleanRecipientTag);
-    const senderTag = authenticatedUser?.tag || socket.userTag || '@anonymous';
+    const senderTag = explicitSender || authenticatedUser?.tag || socket.userTag || '@anonymous';
+
+    touchUserOnline(senderTag, socket.id);
 
     if (recipient?.socketId) {
       io.to(recipient.socketId).emit('disappearing_timer_sync', {
@@ -793,13 +823,20 @@ io.on('connection', (socket) => {
 
   // Disconnect
   socket.on('disconnect', () => {
-    if (authenticatedUser && authenticatedUser.socketId === socket.id) {
-      authenticatedUser.status = 'offline';
-      authenticatedUser.socketId = null;
-      authenticatedUser.lastSeen = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      saveUser(authenticatedUser);
-      console.log(`[DISCONNECT] ${authenticatedUser.tag} went offline`);
-      io.emit('peers_update', getPublicPeerList());
+    if (authenticatedUser) {
+      const userTag = authenticatedUser.tag.toLowerCase();
+      const currentSocketId = socket.id;
+      setTimeout(() => {
+        const currentUser = registeredUsers.get(userTag);
+        if (currentUser && currentUser.socketId === currentSocketId) {
+          currentUser.status = 'offline';
+          currentUser.socketId = null;
+          currentUser.lastSeen = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          saveUser(currentUser);
+          console.log(`[DISCONNECT] ${currentUser.tag} went offline`);
+          io.emit('peers_update', getPublicPeerList());
+        }
+      }, 3000);
     }
   });
 });
