@@ -6,6 +6,7 @@ import {
   Radio, 
   Check, 
   CheckCheck, 
+  RotateCcw,
   MoreVertical,
   Download,
   FileText,
@@ -134,6 +135,7 @@ export const ChatArea = () => {
     activeContact,
     selectContact,
     messages,
+    retryMessage,
     clearChat,
     typingStatus,
     reactMessage,
@@ -1024,7 +1026,17 @@ export const ChatArea = () => {
                       <span className="message-time font-mono">{msg.timestamp}</span>
                       {isUser && (
                         <span className="message-status flex items-center">
-                          {msg.status === 'read' ? (
+                          {msg.status === 'failed' ? (
+                            <button
+                              type="button"
+                              title="Message not sent. Retry"
+                              aria-label="Retry sending message"
+                              className="flex items-center text-danger"
+                              onClick={() => retryMessage(msg.id)}
+                            >
+                              <RotateCcw size={13} />
+                            </button>
+                          ) : msg.status === 'read' ? (
                             <span title="Read by recipient" className="flex items-center text-accent">
                               <CheckCheck size={13} className="drop-shadow-[0_0_4px_var(--accent)]" />
                             </span>
@@ -1032,8 +1044,12 @@ export const ChatArea = () => {
                             <span title="Delivered to peer node" className="flex items-center text-muted">
                               <CheckCheck size={13} />
                             </span>
+                          ) : msg.status === 'queued' ? (
+                            <span title="Saved by relay; waiting for recipient" className="flex items-center text-muted">
+                              <Clock size={13} />
+                            </span>
                           ) : (
-                            <span title="Sent through secure relay" className="flex items-center text-muted">
+                            <span title="Accepted by relay; awaiting recipient confirmation" className="flex items-center text-muted">
                               <Check size={13} />
                             </span>
                           )}

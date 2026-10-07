@@ -20,6 +20,39 @@ function formatDisappearingTime(sec) {
   return `${Math.floor(sec / 3600)}h`;
 }
 
+function createMessageId() {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return `msg_${uuid || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`;
+}
+
+function mergeMessageStores(savedMessages, liveMessages) {
+  const merged = {};
+  if (savedMessages && typeof savedMessages === 'object' && !Array.isArray(savedMessages)) {
+    Object.entries(savedMessages).forEach(([contactId, list]) => {
+      if (Array.isArray(list)) {
+        merged[contactId] = list.filter((message) => message && typeof message === 'object' && typeof message.id === 'string');
+      }
+    });
+  }
+  Object.entries(liveMessages || {}).forEach(([contactId, liveList]) => {
+    if (!Array.isArray(liveList)) return;
+    const savedList = Array.isArray(merged[contactId]) ? merged[contactId] : [];
+    const indexes = new Map(savedList.map((message, index) => [message.id, index]));
+    const combined = [...savedList];
+    liveList.forEach((message) => {
+      const index = indexes.get(message.id);
+      if (index === undefined) {
+        indexes.set(message.id, combined.length);
+        combined.push(message);
+      } else {
+        combined[index] = message;
+      }
+    });
+    merged[contactId] = combined;
+  });
+  return merged;
+}
+
 export const ChatProvider = ({ children }) => {
   // 1. Current Authenticated Profile
   const [currentUser, setCurrentUser] = useState(() => {
@@ -92,7 +125,10 @@ export const ChatProvider = ({ children }) => {
     }
     loadDurableData(`account_${currentUserAccountId}_messages`, {}).then((savedMessages) => {
       if (cancelled) return;
-      setMessages(savedMessages && typeof savedMessages === 'object' ? savedMessages : {});
+      setMessages((liveMessages) => mergeMessageStores(
+        savedMessages,
+        messagesAccountRef.current === currentUserAccountId ? liveMessages : {}
+      ));
       messagesAccountRef.current = currentUserAccountId;
     });
     return () => { cancelled = true; };
@@ -453,11 +489,15 @@ export const ChatProvider = ({ children }) => {
         };
 
         // Add message to conversation
+        const accountKey = accountId(currentUserRef.current);
+        const canPreserveCurrentStore = messagesAccountRef.current === accountKey;
+        messagesAccountRef.current = accountKey;
         setMessages((prev) => {
-          const existingList = prev[contactId] || [];
-          if (existingList.some((m) => m.id === incomingMsg.id)) return prev;
+          const currentStore = canPreserveCurrentStore ? prev : {};
+          const existingList = currentStore[contactId] || [];
+          if (existingList.some((m) => m.id === incomingMsg.id)) return currentStore;
           return {
-            ...prev,
+            ...currentStore,
             [contactId]: [...existingList, incomingMsg],
           };
         });
@@ -501,13 +541,18 @@ export const ChatProvider = ({ children }) => {
             pinned: false,
           }, ...prev]);
         }
+        const accountKey = accountId(currentUserRef.current);
+        const canPreserveCurrentStore = messagesAccountRef.current === accountKey;
+        messagesAccountRef.current = accountKey;
         setMessages((prev) => {
-          const list = prev[contactId] || [];
-          if (list.some((item) => item.id === message.id)) return prev;
-          return { ...prev, [contactId]: [...list, { ...message, sender: 'user', senderTag: currentUserRef.current?.tag, status: 'sent' }] };
+          const currentStore = canPreserveCurrentStore ? prev : {};
+          const list = currentStore[contactId] || [];
+          if (list.some((item) => item.id === message.id)) return currentStore;
+          return { ...currentStore, [contactId]: [...list, { ...message, sender: 'user', senderTag: currentUserRef.current?.tag, status: 'sent' }] };
         });
       },
       onMessageStatusUpdate: (data) => {
+        if (!data?.messageId || typeof data.status !== 'string') return;
         const { messageId, status } = data;
         if (status === 'read') {
           soundFX.playReadTick();
@@ -526,6 +571,24 @@ export const ChatProvider = ({ children }) => {
             }
           });
           return hasChanged ? next : prev;
+        });
+      },
+      onMessageRejected: ({ messageId, error }) => {
+        if (messageId) {
+          setMessages((prev) => {
+            const next = { ...prev };
+            Object.keys(next).forEach((contactId) => {
+              next[contactId] = next[contactId].map((message) =>
+                message.id === messageId ? { ...message, status: 'failed' } : message
+              );
+            });
+            return next;
+          });
+        }
+        notificationService.pushToast({
+          title: 'MESSAGE NOT SENT',
+          message: error || 'The relay rejected this message. You can retry it.',
+          type: 'warning',
         });
       },
       onMessageReacted: (data) => {
@@ -690,7 +753,6 @@ export const ChatProvider = ({ children }) => {
             message: noticeText,
             type: sec > 0 ? 'warning' : 'info',
           });
-        }
       },
     });
   }, [selectContact]);
@@ -763,7 +825,7 @@ export const ChatProvider = ({ children }) => {
     if (!targetContact) return;
 
     const newMsg = {
-      id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      id: createMessageId(),
       sender: 'user',
       senderTag: currentUser.tag,
       senderAvatar: currentUser.avatar,
@@ -806,6 +868,19 @@ export const ChatProvider = ({ children }) => {
     // Relay over Socket.io
     socketService.sendMessage(targetContact.tag, newMsg);
   }, [activeContactId, currentUser, contacts]);
+
+  const retryMessage = useCallback((messageId) => {
+    if (!activeContactId) return;
+    const targetContact = contacts.find((contact) => contact.id === activeContactId);
+    const message = messages[activeContactId]?.find((item) => item.id === messageId);
+    if (!targetContact || !message || message.status !== 'failed') return;
+    const retryable = { ...message, status: 'sent' };
+    setMessages((prev) => ({
+      ...prev,
+      [activeContactId]: (prev[activeContactId] || []).map((item) => item.id === messageId ? retryable : item),
+    }));
+    socketService.sendMessage(targetContact.tag, retryable);
+  }, [activeContactId, contacts, messages]);
 
   // Mass Broadcast Blaster
   const broadcastMessage = useCallback((text, targetContactIds) => {
@@ -1114,6 +1189,7 @@ export const ChatProvider = ({ children }) => {
     shredMessage,
     setContactDisappearingTimer,
     sendMessage,
+    retryMessage,
     reactMessage,
     deleteMessage,
     clearChat,

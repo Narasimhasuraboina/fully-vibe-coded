@@ -22,7 +22,7 @@ const EncryptionModal = ({ contact, onClose }) => {
         <div className="modal-header cyber-modal-header">
           <div className="modal-title" id="privacy-dialog-title">
             <ShieldCheck size={18} className="text-accent" />
-            <span>Encryption and privacy</span>
+            <span>Connection and privacy</span>
           </div>
           <button ref={closeButtonRef} type="button" className="btn-close cyber-modal-close" onClick={onClose} aria-label="Close privacy details">
             <X size={18} />
@@ -33,9 +33,9 @@ const EncryptionModal = ({ contact, onClose }) => {
           <div className="security-status-banner">
             <div className="status-icon-ring"><ShieldCheck size={24} className="text-accent" /></div>
             <div className="status-meta">
-              <h4>Direct encrypted relay transmissions</h4>
+              <h4>Messages are not end-to-end encrypted</h4>
               <p>
-                Chatforge transmits signals and attachments over your dedicated private WebSocket relay. Direct peer transmissions are protected, and offline payloads are held in an isolated store-and-forward mailbox until the recipient reconnects.
+                The relay can read messages and attachments, including items waiting in the offline mailbox. Network encryption depends on your deployment: use HTTPS and WSS with a trusted TLS certificate to protect traffic in transit.
               </p>
             </div>
           </div>
@@ -45,7 +45,7 @@ const EncryptionModal = ({ contact, onClose }) => {
               <span className="fp-val">{contact?.name || contact?.tag || 'No conversation selected'}</span>
             </div>
             <p className="box-desc">
-              <strong>Verify the operator's codename before transmitting sensitive payloads.</strong> Traffic is routed through your self-hosted instance without third-party tracking, telemetry, or external cloud services.
+              <strong>Verify the operator's username before sending sensitive information.</strong> A username check does not verify a cryptographic identity. Do not use this relay for information that requires end-to-end encryption.
             </p>
           </div>
         </div>

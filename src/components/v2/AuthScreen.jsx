@@ -33,8 +33,8 @@ export const AuthScreen = () => {
       return;
     }
 
-    if (!password || password.length < (authMode === 'register' ? 6 : 4)) {
-      setErrorMsg(authMode === 'register' ? 'Password must be at least 6 characters.' : 'Password must be at least 4 characters.');
+    if (!password || password.length < (authMode === 'register' ? 10 : 4) || new TextEncoder().encode(password).length > 1024) {
+      setErrorMsg(authMode === 'register' ? 'Password must be at least 10 characters and no more than 1024 bytes.' : 'Password must be at least 4 characters and no more than 1024 bytes.');
       soundFX.playGlitchAlarm();
       return;
     }
@@ -136,10 +136,10 @@ export const AuthScreen = () => {
             <input
               id="auth-username"
               type="text"
-              maxLength={authMode === 'login' ? 128 : 32}
+              maxLength={32}
               autoFocus
               className="login-input"
-              placeholder={authMode === 'login' ? 'Username or @user:homeserver' : 'Choose a username'}
+              placeholder={authMode === 'login' ? 'Enter your username' : 'Choose a username'}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               disabled={loading}
@@ -153,6 +153,7 @@ export const AuthScreen = () => {
               <input
                 id="auth-password"
                 type={showPassword ? 'text' : 'password'}
+                maxLength={1024}
                 className="login-input"
                 placeholder={authMode === 'register' ? 'At least 10 characters' : 'Enter your password'}
                 value={password}

@@ -59,9 +59,10 @@ class StandaloneSocketService {
     });
 
     // Incoming messages
-    this.socket.on('receive_message', (data) => {
+    this.socket.on('receive_message', (data, acknowledge) => {
       this.callbacks.onMessageReceived?.(data);
       this.callbacks.onReceiveMessage?.(data);
+      acknowledge?.({ received: true });
     });
 
     // Peer directory updates
@@ -96,8 +97,9 @@ class StandaloneSocketService {
     });
 
     // Ephemeral disappearing timer sync (Two-way or one-way notification)
-    this.socket.on('disappearing_timer_sync', (data) => {
+    this.socket.on('disappearing_timer_sync', (data, acknowledge) => {
       this.callbacks.onDisappearingTimerSync?.(data);
+      acknowledge?.({ received: true });
     });
 
     // Single active device enforcement: kicked out because user logged in on another device
@@ -188,6 +190,8 @@ class StandaloneSocketService {
     socket.emit('send_message', { recipientTag, message }, (response) => {
       if (response?.status) {
         this.callbacks.onMessageStatusUpdate?.({ messageId: message?.id, status: response.status });
+      } else if (response?.success === false) {
+        this.callbacks.onMessageRejected?.({ messageId: message?.id, error: response.error });
       }
     });
     return true;
