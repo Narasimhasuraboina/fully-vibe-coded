@@ -76,7 +76,24 @@ const port = Number(process.env.PORT) || 3001;
 app.disable('x-powered-by');
 const trustProxyHops = Number.parseInt(process.env.TRUST_PROXY || '', 10);
 app.set('trust proxy', Number.isInteger(trustProxyHops) && trustProxyHops > 0 ? trustProxyHops : false);
-app.use(cors({ origin: allowConfiguredOrigin, credentials: true }));
+app.use(cors({
+  origin: (origin, callback) => {
+    // Browsers send Origin on module asset requests. Permit this service's own
+    // origin so the deployed SPA can load its JS/CSS bundle even when
+    // ALLOWED_ORIGINS is only configured for cross-origin clients.
+    if (origin) {
+      try {
+        const requestOrigin = new URL(origin);
+        const serviceOrigin = process.env.RENDER_EXTERNAL_URL
+          ? new URL(process.env.RENDER_EXTERNAL_URL).origin
+          : null;
+        if (serviceOrigin && requestOrigin.origin === serviceOrigin) return callback(null, true);
+      } catch { /* fall through to the configured origin list */ }
+    }
+    allowConfiguredOrigin(origin, callback);
+  },
+  credentials: true,
+}));
 app.use(compression());
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ limit: '1mb', extended: true }));
