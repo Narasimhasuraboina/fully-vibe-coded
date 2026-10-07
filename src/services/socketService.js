@@ -160,6 +160,7 @@ class StandaloneSocketService {
     const socket = this.initSocket();
 
     if (socket.connected && profile) {
+      this.callbacks.onConnect?.();
       socket.emit('resume_session', profile, (res) => {
         if (res?.success) {
           this.callbacks.onRegistered?.({ success: true });

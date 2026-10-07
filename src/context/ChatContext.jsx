@@ -119,7 +119,7 @@ export const ChatProvider = ({ children }) => {
 
   useEffect(() => {
     let cancelled = false;
-    messagesAccountRef.current = null;
+    messagesAccountRef.current = currentUserAccountId || null;
     if (!currentUserAccountId) {
       return undefined;
     }
@@ -770,6 +770,8 @@ export const ChatProvider = ({ children }) => {
   // Auth: Login / Register
   const login = (profile) => {
     const { password: _password, ...safeProfile } = profile;
+    const accountKey = accountId(safeProfile);
+    currentUserRef.current = safeProfile;
     setCurrentUser(safeProfile);
     saveState('my_profile', safeProfile);
 
@@ -781,13 +783,15 @@ export const ChatProvider = ({ children }) => {
       if (c?.id && c?.tag) mergedMap.set(c.id, c);
     });
     const loadedContacts = Array.from(mergedMap.values());
+    contactsRef.current = loadedContacts;
+    activeContactRef.current = loadedContacts[0]?.id || null;
 
     const loadedSettings = profile.settings || loadAccountState(profile, 'gb_settings', DEFAULT_GB_SETTINGS);
     const loadedScheduled = loadAccountState(profile, 'scheduled', []);
     const loadedPinned = loadAccountState(profile, 'pinned_messages', {});
 
     setContacts(loadedContacts);
-    messagesAccountRef.current = null;
+    messagesAccountRef.current = accountKey;
     setMessages({});
     setScheduledMessages(loadedScheduled);
     setPinnedMessageIds(loadedPinned);

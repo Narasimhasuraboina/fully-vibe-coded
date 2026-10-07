@@ -61,14 +61,12 @@ export const AuthScreen = () => {
       if (res && res.success) {
         soundFX.playSent();
         setSuccessMsg(authMode === 'register' ? 'ACCOUNT CREATED // INITIALIZING...' : 'ACCESS GRANTED // INITIALIZING...');
-        setTimeout(() => {
-          login({
-            ...res.peerInfo,
-            sessionToken: res.sessionToken,
-            contacts: res.contacts || [],
-            settings: res.settings || null,
-          });
-        }, 500);
+        login({
+          ...res.peerInfo,
+          sessionToken: res.sessionToken,
+          contacts: res.contacts || [],
+          settings: res.settings || null,
+        });
       } else {
         soundFX.playGlitchAlarm();
         setErrorMsg(res?.error || 'Authentication rejected by relay server.');

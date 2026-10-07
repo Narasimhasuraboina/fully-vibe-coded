@@ -5,14 +5,10 @@ import { CARTOON_AVATARS } from '../avatars';
 
 const PRESET_AVATARS = CARTOON_AVATARS;
 
-const ProfileModal = ({ currentProfile, onSaveProfile, onClose, serverInfo }) => {
+const ProfileModal = ({ currentProfile, onSaveProfile, onClose }) => {
   const username = currentProfile?.username || currentProfile?.name || 'Operator_Zero';
   const [avatar, setAvatar] = useState(currentProfile?.avatar || PRESET_AVATARS[0]);
   const [customStatus, setCustomStatus] = useState(currentProfile?.customStatus || 'Active Node on Mesh Network');
-  const appAddress = window.location.protocol === 'https:'
-    ? window.location.origin
-    : `http://${serverInfo?.localIP || window.location.hostname}:${serverInfo?.port || 3001}`;
-
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') onClose();
@@ -46,18 +42,15 @@ const ProfileModal = ({ currentProfile, onSaveProfile, onClose, serverInfo }) =>
         </div>
 
         <div className="modal-body">
-          {/* Multi-Device LAN Pairing Intel */}
+          {/* The relay currently enforces one active browser session per account. */}
           <div className="lan-pairing-box">
             <div className="lan-title">
               <Globe size={14} className="text-accent" />
-              <span>REAL-TIME MULTI-DEVICE ACCESS</span>
+              <span>SINGLE ACTIVE SESSION</span>
             </div>
             <p className="lan-desc">
-              Open this application on any second device (phone, laptop, tablet) on your local Wi-Fi / network to chat in real-time:
+              This account can be active in one browser at a time. Signing in on another browser or device ends the existing session.
             </p>
-            <div className="lan-url-badge">
-              <span>{appAddress}</span>
-            </div>
           </div>
 
           <form onSubmit={handleSubmit}>
